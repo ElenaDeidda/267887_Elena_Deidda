@@ -27,6 +27,7 @@
 import os
 import argparse
 import subprocess
+import urllib.request
 
 import torch
 
@@ -118,7 +119,49 @@ def parse_args():
                    help="salva lo state_dict del modello migliore di questa run in bin/")
     p.add_argument("--shutdown", action="store_true",
                    help="spegne la macchina al termine (anche in caso di errore)")
+    p.add_argument("--notify", type=str, default=None,
+                   help="topic ntfy.sh (es. 'elena-nlu-vm-x7k2') o URL/webhook "
+                        "completo a cui mandare una notifica a fine run")
     return p.parse_args()
+
+
+def send_notification(target, best_record=None, error=None):
+    """Manda una notifica push a fine run (ntfy.sh o qualsiasi webhook HTTP POST).
+
+    'target' puo' essere un semplice topic ntfy (es. 'elena-nlu-vm-x7k2') oppure
+    un URL completo. Il messaggio riassume la migliore PPL o l'eventuale errore.
+    """
+    url = target if target.startswith("http") else f"https://ntfy.sh/{target}"
+
+    if error is not None:
+        title = "Run FALLITA"
+        message = f"Errore: {type(error).__name__}: {error}"
+        priority, tags = "high", "warning"
+    elif best_record is not None:
+        passed = best_record["passes_threshold"]
+        title = f"Run finita - test PPL {best_record['test_ppl']:.2f}"
+        message = (
+            f"Best: {best_record['label']}\n"
+            f"Test PPL: {best_record['test_ppl']:.2f} "
+            f"({'OK <250' if passed else 'NON soddisfa <250'})\n"
+            f"lr: {best_record['lr']}\n"
+            f"config: {best_record['config']}"
+        )
+        priority, tags = "default", ("white_check_mark" if passed else "warning")
+    else:
+        title = "Run finita"
+        message = "Esecuzione terminata (nessun risultato registrato)."
+        priority, tags = "default", "information_source"
+
+    try:
+        req = urllib.request.Request(url, data=message.encode("utf-8"), method="POST")
+        req.add_header("Title", title)        # header HTTP: solo ASCII
+        req.add_header("Priority", priority)
+        req.add_header("Tags", tags)          # emoji via shortcode (es. white_check_mark)
+        urllib.request.urlopen(req, timeout=10)
+        print(f"[notify] notifica inviata a {url}")
+    except Exception as e:
+        print(f"[notify] invio fallito ({url}): {e}")
 
 
 def shutdown_machine():
@@ -206,12 +249,23 @@ def run_sweep(group, key, values, base_cfg, base_lr, loaders, tokenizer, device,
 
 def main():
     args = parse_args()
+    best_record = None
+    err = None
     try:
-        _run(args)
+        best_record = _run(args)
+    except Exception as e:
+        err = e
     finally:
-        # eseguito sempre: cosi' la VM si spegne anche se il training va in errore
+        # Ordine corretto: training (gia' fatto) -> notifica -> shutdown.
+        # Eseguito sempre, cosi' avvisa/spegne anche se il training va in errore.
+        if args.notify:
+            send_notification(args.notify, best_record=best_record, error=err)
         if args.shutdown:
             shutdown_machine()
+    # Ri-solleva l'eventuale errore DOPO aver notificato/spento, per avere
+    # comunque un exit code corretto e il traceback nei log.
+    if err is not None:
+        raise err
 
 
 def _run(args):
@@ -273,6 +327,8 @@ def _run(args):
 
     print(f"\nRisultati JSON: {RESULTS_JSON}")
     print(f"Report osservazioni: {OBSERVATIONS_MD}")
+
+    return best_record
 
 
 if __name__ == "__main__":
