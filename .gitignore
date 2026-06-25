@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Modelli salvati (pesanti) - rigenerabili con i main.py
+bin/
+*.pt
+
+# Sistema
+.DS_Store

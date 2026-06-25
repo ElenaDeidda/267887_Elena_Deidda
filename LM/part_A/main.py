@@ -238,12 +238,13 @@ def run_sweep(group, key, values, base_cfg, base_lr, loaders, tokenizer, device,
         append_result(RESULTS_JSON, record)
         regenerate_observations_md(RESULTS_JSON, OBSERVATIONS_MD)
 
-        if best_record is None or info["test_ppl"] < best_record["test_ppl"]:
+        # selezione del migliore SEMPRE sul dev set (mai sul test): info["best_dev_ppl"]
+        if best_record is None or info["best_dev_ppl"] < best_record["best_dev_ppl"]:
             best_model, best_record = model, record
 
     if best_record is not None:
-        print(f"\n>>> Migliore del gruppo '{group}': {best_record['label']} "
-              f"-> test PPL {best_record['test_ppl']:.2f}")
+        print(f"\n>>> Migliore del gruppo '{group}' (scelto su dev): {best_record['label']} "
+              f"-> dev PPL {best_record['best_dev_ppl']:.2f} | test PPL {best_record['test_ppl']:.2f}")
     return best_model, best_record
 
 
@@ -304,7 +305,7 @@ def _run(args):
             values = parse_values(args.values, key) if args.values else default_values
             m, r = run_sweep(g, key, values, base_cfg, base_lr,
                              loaders, tokenizer, device, args)
-            if r is not None and (best_record is None or r["test_ppl"] < best_record["test_ppl"]):
+            if r is not None and (best_record is None or r["best_dev_ppl"] < best_record["best_dev_ppl"]):
                 best_model, best_record = m, r
 
     else:

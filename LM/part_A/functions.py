@@ -258,11 +258,13 @@ def regenerate_observations_md(results_path, md_path):
             f.write("\n".join(lines) + "\n")
         return
 
-    # Migliore globale
-    best = min(results, key=lambda r: r["test_ppl"])
+    # Migliore globale: la selezione si fa SEMPRE sul dev set (mai sul test).
+    # Il test PPL viene solo riportato come numero finale della config scelta.
+    best = min(results, key=lambda r: r["best_dev_ppl"])
     lines.append("## Migliore configurazione finora")
     lines.append("")
-    lines.append(f"- **Test PPL: {best['test_ppl']:.2f}** "
+    lines.append(f"- selezione su **best dev PPL: {best['best_dev_ppl']:.2f}** "
+                 f"-> **Test PPL: {best['test_ppl']:.2f}** "
                  f"({'OK <250' if best['passes_threshold'] else 'NON soddisfa <250'})")
     lines.append(f"- gruppo: `{best['group']}` | label: `{best['label']}`")
     lines.append(f"- lr: `{best['lr']}` | parametri: {best['n_params']:,}")
@@ -285,7 +287,7 @@ def regenerate_observations_md(results_path, md_path):
         lines.append("")
         lines.append("| valore | lr | params | epoche | best dev PPL | test PPL | <250 | |")
         lines.append("|---|---|---|---|---|---|---|---|")
-        best_run = min(runs, key=lambda r: r["test_ppl"])
+        best_run = min(runs, key=lambda r: r["best_dev_ppl"])  # scelta sul dev, non sul test
         for r in runs:
             star = "⭐" if r is best_run else ""
             val = r["swept_value"] if r["swept_value"] is not None else "-"
@@ -297,13 +299,14 @@ def regenerate_observations_md(results_path, md_path):
         lines.append("")
         # Osservazione automatica
         if len(runs) > 1 and best_run["swept_value"] is not None:
-            worst_run = max(runs, key=lambda r: r["test_ppl"])
-            delta = worst_run["test_ppl"] - best_run["test_ppl"]
+            worst_run = max(runs, key=lambda r: r["best_dev_ppl"])
+            delta = worst_run["best_dev_ppl"] - best_run["best_dev_ppl"]
             lines.append(
-                f"- Osservazione: il valore migliore e' "
-                f"**{best_run['swept_value']}** (test PPL {best_run['test_ppl']:.2f}); "
-                f"il peggiore {worst_run['swept_value']} (PPL {worst_run['test_ppl']:.2f}), "
-                f"un divario di {delta:.2f} punti di PPL."
+                f"- Osservazione: il valore migliore (scelto sul dev) e' "
+                f"**{best_run['swept_value']}** (dev PPL {best_run['best_dev_ppl']:.2f}, "
+                f"test PPL {best_run['test_ppl']:.2f}); il peggiore "
+                f"{worst_run['swept_value']} (dev PPL {worst_run['best_dev_ppl']:.2f}), "
+                f"un divario di {delta:.2f} punti di dev PPL."
             )
         else:
             lines.append(
