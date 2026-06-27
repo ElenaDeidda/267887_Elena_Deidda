@@ -41,13 +41,15 @@ def count_params(model):
     return sum(p.numel() for p in model.parameters())
 
 
-def train_loop(data, optimizer, criterion, model, clip=5.0):
+def train_loop(data, optimizer, criterion, model, device, clip=5.0):
     """Un'epoca di training. Restituisce la loss media pesata sui token."""
     model.train()
     loss_array = []
     number_of_tokens = []
 
     for input_ids, labels, n_tokens in data:
+        input_ids = input_ids.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
         optimizer.zero_grad()
         output = model(input_ids)                # (B, L, vocab)
         # CrossEntropyLoss vuole (B, vocab, L), quindi permutiamo
@@ -62,13 +64,15 @@ def train_loop(data, optimizer, criterion, model, clip=5.0):
     return sum(loss_array) / sum(number_of_tokens)
 
 
-def eval_loop(data, eval_criterion, model):
+def eval_loop(data, eval_criterion, model, device):
     """Valutazione senza calcolo del gradiente. Restituisce (PPL, loss media)."""
     model.eval()
     loss_array = []
     number_of_tokens = []
     with torch.no_grad():
         for input_ids, labels, n_tokens in data:
+            input_ids = input_ids.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
             output = model(input_ids)
             loss = eval_criterion(output.permute(0, 2, 1), labels)
             loss_array.append(loss.item() * n_tokens)
@@ -130,8 +134,8 @@ def run_experiment(name, config, loaders, tokenizer, device,
     pbar = tqdm(range(n_epochs), desc=name)
     for epoch in pbar:
         epochs_run = epoch + 1
-        train_loop(train_loader, optimizer, criterion_train, model)
-        ppl_dev, _ = eval_loop(dev_loader, criterion_eval, model)
+        train_loop(train_loader, optimizer, criterion_train, model, device)
+        ppl_dev, _ = eval_loop(dev_loader, criterion_eval, model, device)
         pbar.set_description(f"{name} | Dev PPL: {ppl_dev:.2f}")
 
         if ppl_dev < best_ppl:          # piu' bassa = migliore
@@ -145,7 +149,7 @@ def run_experiment(name, config, loaders, tokenizer, device,
             break
 
     best_model.to(device)
-    test_ppl, _ = eval_loop(test_loader, criterion_eval, best_model)
+    test_ppl, _ = eval_loop(test_loader, criterion_eval, best_model, device)
     print(f"[{name}] Best Dev PPL: {best_ppl:.2f} | Test PPL: {test_ppl:.2f} "
           f"| params: {n_params:,} | epoche: {epochs_run} (best @ {best_epoch})")
 

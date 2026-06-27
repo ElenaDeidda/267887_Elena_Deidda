@@ -1,0 +1,122 @@
+[
+  {
+    "timestamp": "2026-06-27T15:39:58",
+    "group": "baseline-lr",
+    "label": "baseline-lr=0.001",
+    "swept_key": "lr",
+    "swept_value": 0.001,
+    "lr": 0.001,
+    "config": {
+      "pos_emb_size": 1024,
+      "d_model": 256,
+      "n_heads": 4,
+      "num_layers": 4,
+      "ff_dim": 1024,
+      "dropout": 0.0,
+      "weight_tying": false
+    },
+    "n_params": 29203537,
+    "epochs_run": 6,
+    "best_epoch": 2,
+    "best_dev_ppl": 39.4349,
+    "test_ppl": 35.6342,
+    "passes_threshold": true,
+    "seed": 42
+  },
+  {
+    "timestamp": "2026-06-27T16:03:49",
+    "group": "baseline-lr",
+    "label": "baseline-lr=0.0005",
+    "swept_key": "lr",
+    "swept_value": 0.0005,
+    "lr": 0.0005,
+    "config": {
+      "pos_emb_size": 1024,
+      "d_model": 256,
+      "n_heads": 4,
+      "num_layers": 4,
+      "ff_dim": 1024,
+      "dropout": 0.0,
+      "weight_tying": false
+    },
+    "n_params": 29203537,
+    "epochs_run": 7,
+    "best_epoch": 3,
+    "best_dev_ppl": 39.1303,
+    "test_ppl": 35.6774,
+    "passes_threshold": true,
+    "seed": 42
+  },
+  {
+    "timestamp": "2026-06-27T16:31:05",
+    "group": "baseline-lr",
+    "label": "baseline-lr=0.0003",
+    "swept_key": "lr",
+    "swept_value": 0.0003,
+    "lr": 0.0003,
+    "config": {
+      "pos_emb_size": 1024,
+      "d_model": 256,
+      "n_heads": 4,
+      "num_layers": 4,
+      "ff_dim": 1024,
+      "dropout": 0.0,
+      "weight_tying": false
+    },
+    "n_params": 29203537,
+    "epochs_run": 8,
+    "best_epoch": 4,
+    "best_dev_ppl": 39.2468,
+    "test_ppl": 35.5698,
+    "passes_threshold": true,
+    "seed": 42
+  },
+  {
+    "timestamp": "2026-06-27T17:28:55",
+    "group": "baseline-lr",
+    "label": "baseline-lr=0.0001",
+    "swept_key": "lr",
+    "swept_value": 0.0001,
+    "lr": 0.0001,
+    "config": {
+      "pos_emb_size": 1024,
+      "d_model": 256,
+      "n_heads": 4,
+      "num_layers": 4,
+      "ff_dim": 1024,
+      "dropout": 0.0,
+      "weight_tying": false
+    },
+    "n_params": 29203537,
+    "epochs_run": 17,
+    "best_epoch": 13,
+    "best_dev_ppl": 40.5644,
+    "test_ppl": 36.6083,
+    "passes_threshold": true,
+    "seed": 42
+  },
+  {
+    "timestamp": "2026-06-27T18:14:55",
+    "group": "d_model",
+    "label": "d_model=128",
+    "swept_key": "d_model",
+    "swept_value": 128,
+    "lr": 0.0005,
+    "config": {
+      "pos_emb_size": 1024,
+      "d_model": 128,
+      "n_heads": 4,
+      "num_layers": 4,
+      "ff_dim": 1024,
+      "dropout": 0.0,
+      "weight_tying": false
+    },
+    "n_params": 14366801,
+    "epochs_run": 10,
+    "best_epoch": 6,
+    "best_dev_ppl": 41.554,
+    "test_ppl": 37.4151,
+    "passes_threshold": true,
+    "seed": 42
+  }
+]

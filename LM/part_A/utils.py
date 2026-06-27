@@ -52,12 +52,17 @@ def get_tokenizer(model_name="openai-community/gpt2"):
     return tokenizer
 
 
-def collate_fn(batch, tokenizer, device):
+def collate_fn(batch, tokenizer):
     """Funzione di collate per il DataLoader.
 
     Tokenizza il batch con padding, poi costruisce input e label per il
     Language Modeling: la label e' la sequenza di input shiftata a sinistra
     di una posizione (per ogni token si predice il token successivo).
+
+    Resta su CPU: con num_workers>0 questa funzione gira in processi worker,
+    dove inizializzare CUDA non e' sicuro. Lo spostamento su device avviene
+    nel training/eval loop (functions.py), cosi' il prossimo batch puo' essere
+    tokenizzato in parallelo mentre la GPU lavora su quello corrente.
 
     Returns:
         input_ids: tensore (B, L) dei token di input
@@ -67,9 +72,9 @@ def collate_fn(batch, tokenizer, device):
     tokenized = tokenizer(batch, padding=True, return_tensors="pt")
 
     # input = tutti i token tranne l'ultimo
-    input_ids = tokenized.input_ids[:, :-1].detach().clone().to(device)
+    input_ids = tokenized.input_ids[:, :-1]
     # label = tutti i token tranne il primo -> predici il token successivo
-    labels = tokenized.input_ids[:, 1:].detach().clone().to(device)
+    labels = tokenized.input_ids[:, 1:]
 
     # contiamo i token non-pad (come intero, per usarlo nelle medie pesate)
     n_tokens = int((input_ids != tokenizer.pad_token_id).sum().item())
@@ -78,11 +83,15 @@ def collate_fn(batch, tokenizer, device):
 
 
 def get_dataloaders(train_path, dev_path, test_path, tokenizer, device,
-                    train_bs=8, eval_bs=16):
+                    train_bs=8, eval_bs=16, num_workers=4):
     """Costruisce e restituisce i tre DataLoader (train, dev, test).
 
     Riduci train_bs se la GPU non ha abbastanza memoria. Un batch piu' piccolo
     aumenta gli step di backpropagation e funge da leggera regolarizzazione.
+
+    num_workers>0 parallelizza la tokenizzazione su CPU rispetto al calcolo
+    GPU; pin_memory + persistent_workers riducono ulteriormente l'overhead
+    per batch quando si allena su GPU.
     """
     train_raw = read_file(train_path)
     dev_raw = read_file(dev_path)
@@ -92,11 +101,18 @@ def get_dataloaders(train_path, dev_path, test_path, tokenizer, device,
     dev_dataset = PennTreeBank(dev_raw)
     test_dataset = PennTreeBank(test_raw)
 
-    cf = partial(collate_fn, tokenizer=tokenizer, device=device)
+    cf = partial(collate_fn, tokenizer=tokenizer)
+    pin = device != "cpu"
 
     train_loader = DataLoader(train_dataset, batch_size=train_bs,
-                              collate_fn=cf, shuffle=True)
-    dev_loader = DataLoader(dev_dataset, batch_size=eval_bs, collate_fn=cf)
-    test_loader = DataLoader(test_dataset, batch_size=eval_bs, collate_fn=cf)
+                              collate_fn=cf, shuffle=True,
+                              num_workers=num_workers, pin_memory=pin,
+                              persistent_workers=num_workers > 0)
+    dev_loader = DataLoader(dev_dataset, batch_size=eval_bs, collate_fn=cf,
+                            num_workers=num_workers, pin_memory=pin,
+                            persistent_workers=num_workers > 0)
+    test_loader = DataLoader(test_dataset, batch_size=eval_bs, collate_fn=cf,
+                             num_workers=num_workers, pin_memory=pin,
+                             persistent_workers=num_workers > 0)
 
     return train_loader, dev_loader, test_loader

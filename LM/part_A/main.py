@@ -112,7 +112,8 @@ def parse_args():
     # Parametri di training
     p.add_argument("--epochs", type=int, default=100)
     p.add_argument("--patience", type=int, default=3)
-    p.add_argument("--train_bs", type=int, default=8)
+    # cambiata da default 8 per migliorare le prestazioni
+    p.add_argument("--train_bs", type=int, default=32)
     p.add_argument("--eval_bs", type=int, default=16)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--save_best", action="store_true",
