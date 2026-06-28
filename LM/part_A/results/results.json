@@ -310,5 +310,77 @@
     "test_ppl": 34.6564,
     "passes_threshold": true,
     "seed": 42
+  },
+  {
+    "timestamp": "2026-06-28T10:18:09",
+    "group": "ff_dim",
+    "label": "ff_dim=512",
+    "swept_key": "ff_dim",
+    "swept_value": 512,
+    "lr": 0.0005,
+    "config": {
+      "pos_emb_size": 1024,
+      "d_model": 384,
+      "n_heads": 8,
+      "num_layers": 6,
+      "ff_dim": 512,
+      "dropout": 0.0,
+      "weight_tying": false
+    },
+    "n_params": 44963665,
+    "epochs_run": 6,
+    "best_epoch": 2,
+    "best_dev_ppl": 38.862,
+    "test_ppl": 35.2751,
+    "passes_threshold": true,
+    "seed": 42
+  },
+  {
+    "timestamp": "2026-06-28T10:45:31",
+    "group": "ff_dim",
+    "label": "ff_dim=1024",
+    "swept_key": "ff_dim",
+    "swept_value": 1024,
+    "lr": 0.0005,
+    "config": {
+      "pos_emb_size": 1024,
+      "d_model": 384,
+      "n_heads": 8,
+      "num_layers": 6,
+      "ff_dim": 1024,
+      "dropout": 0.0,
+      "weight_tying": false
+    },
+    "n_params": 47326033,
+    "epochs_run": 6,
+    "best_epoch": 2,
+    "best_dev_ppl": 37.9884,
+    "test_ppl": 34.6564,
+    "passes_threshold": true,
+    "seed": 42
+  },
+  {
+    "timestamp": "2026-06-28T11:15:23",
+    "group": "ff_dim",
+    "label": "ff_dim=2048",
+    "swept_key": "ff_dim",
+    "swept_value": 2048,
+    "lr": 0.0005,
+    "config": {
+      "pos_emb_size": 1024,
+      "d_model": 384,
+      "n_heads": 8,
+      "num_layers": 6,
+      "ff_dim": 2048,
+      "dropout": 0.0,
+      "weight_tying": false
+    },
+    "n_params": 52050769,
+    "epochs_run": 6,
+    "best_epoch": 2,
+    "best_dev_ppl": 37.3929,
+    "test_ppl": 33.843,
+    "passes_threshold": true,
+    "seed": 42
   }
 ]

@@ -1,15 +1,15 @@
 # Osservazioni esperimenti - LM Part 1.A
 
-_Generato automaticamente da main.py. Ultimo aggiornamento: 2026-06-28T09:38:38._
+_Generato automaticamente da main.py. Ultimo aggiornamento: 2026-06-28T11:15:23._
 
 Vincolo della consegna: **PPL test < 250**. La modifica va tenuta solo se migliora (o non peggiora) la PPL; gli esperimenti falliti vanno comunque commentati nel report.
 
 ## Migliore configurazione finora
 
-- selezione su **best dev PPL: 37.99** -> **Test PPL: 34.66** (OK <250)
-- gruppo: `num_layers` | label: `num_layers=6`
-- lr: `0.0005` | parametri: 47,326,033
-- config: `{'pos_emb_size': 1024, 'd_model': 384, 'n_heads': 8, 'num_layers': 6, 'ff_dim': 1024, 'dropout': 0.0, 'weight_tying': False}`
+- selezione su **best dev PPL: 37.39** -> **Test PPL: 33.84** (OK <250)
+- gruppo: `ff_dim` | label: `ff_dim=2048`
+- lr: `0.0005` | parametri: 52,050,769
+- config: `{'pos_emb_size': 1024, 'd_model': 384, 'n_heads': 8, 'num_layers': 6, 'ff_dim': 2048, 'dropout': 0.0, 'weight_tying': False}`
 
 ## baseline-lr
 _Step 0 - Baseline: ricerca del learning rate (modello fisso)._
@@ -58,5 +58,17 @@ _Step 1 - Iperparametri: numero di blocchi transformer (num_layers)._
 | 6 | 0.0005 | 47,326,033 | 6 | 37.99 | 34.66 | sì | ⭐ |
 
 - Osservazione: il valore migliore (scelto sul dev) e' **6** (dev PPL 37.99, test PPL 34.66); il peggiore 2 (dev PPL 41.56), un divario di 3.57 punti di dev PPL.
+- Note (da completare nel report): 
+
+## ff_dim
+_Step 1 - Iperparametri: dimensione del feed-forward (ff_dim)._
+
+| valore | lr | params | epoche | best dev PPL | test PPL | <250 | |
+|---|---|---|---|---|---|---|---|
+| 512 | 0.0005 | 44,963,665 | 6 | 38.86 | 35.28 | sì |  |
+| 1024 | 0.0005 | 47,326,033 | 6 | 37.99 | 34.66 | sì |  |
+| 2048 | 0.0005 | 52,050,769 | 6 | 37.39 | 33.84 | sì | ⭐ |
+
+- Osservazione: il valore migliore (scelto sul dev) e' **2048** (dev PPL 37.39, test PPL 33.84); il peggiore 512 (dev PPL 38.86), un divario di 1.47 punti di dev PPL.
 - Note (da completare nel report): 
 

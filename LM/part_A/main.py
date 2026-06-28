@@ -57,9 +57,9 @@ BIN_DIR = "bin"
 # ----------------------------------------------------------------------------
 BASE_CONFIG = dict(
     pos_emb_size=1024,
-    d_model=256,
-    n_heads=4,
-    num_layers=4,
+    d_model=384,
+    n_heads=8,
+    num_layers=6,
     ff_dim=1024,
     dropout=0.0,
     weight_tying=False,
