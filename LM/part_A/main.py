@@ -61,7 +61,7 @@ BASE_CONFIG = dict(
     n_heads=8,
     num_layers=6,
     ff_dim=2048,
-    dropout=0.0,
+    dropout=0.1,
     weight_tying=False,
 )
 BASE_LR = 5e-4

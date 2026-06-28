@@ -1,15 +1,15 @@
 # Osservazioni esperimenti - LM Part 1.A
 
-_Generato automaticamente da main.py. Ultimo aggiornamento: 2026-06-28T16:05:36._
+_Generato automaticamente da main.py. Ultimo aggiornamento: 2026-06-28T18:20:42._
 
 Vincolo della consegna: **PPL test < 250**. La modifica va tenuta solo se migliora (o non peggiora) la PPL; gli esperimenti falliti vanno comunque commentati nel report.
 
 ## Migliore configurazione finora
 
-- selezione su **best dev PPL: 37.39** -> **Test PPL: 33.84** (OK <250)
-- gruppo: `ff_dim` | label: `ff_dim=2048`
+- selezione su **best dev PPL: 36.86** -> **Test PPL: 33.07** (OK <250)
+- gruppo: `weight_tying` | label: `weight_tying=False`
 - lr: `0.0005` | parametri: 52,050,769
-- config: `{'pos_emb_size': 1024, 'd_model': 384, 'n_heads': 8, 'num_layers': 6, 'ff_dim': 2048, 'dropout': 0.0, 'weight_tying': False}`
+- config: `{'pos_emb_size': 1024, 'd_model': 384, 'n_heads': 8, 'num_layers': 6, 'ff_dim': 2048, 'dropout': 0.1, 'weight_tying': False}`
 
 ## baseline-lr
 _Step 0 - Baseline: ricerca del learning rate (modello fisso)._
@@ -85,5 +85,16 @@ _Step 2 - Dropout nei 4 punti della rete._
 | 0.2 | 0.0005 | 52,050,769 | 8 | 37.75 | 33.65 | sì |  |
 
 - Osservazione: il valore migliore (scelto sul dev) e' **0.1** (dev PPL 37.46, test PPL 33.72); il peggiore 0.2 (dev PPL 37.75), un divario di 0.29 punti di dev PPL.
+- Note (da completare nel report): 
+
+## weight_tying
+_Step 3 - Weight tying tra token_embed e lm_head._
+
+| valore | lr | params | epoche | best dev PPL | test PPL | <250 | |
+|---|---|---|---|---|---|---|---|
+| False | 0.0005 | 52,050,769 | 7 | 36.86 | 33.07 | sì | ⭐ |
+| True | 0.0005 | 32,752,081 | 20 | 44.47 | 39.45 | sì |  |
+
+- Osservazione: il valore migliore (scelto sul dev) e' **False** (dev PPL 36.86, test PPL 33.07); il peggiore True (dev PPL 44.47), un divario di 7.61 punti di dev PPL.
 - Note (da completare nel report): 
 

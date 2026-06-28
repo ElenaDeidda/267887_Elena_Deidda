@@ -526,5 +526,53 @@
     "test_ppl": 33.6541,
     "passes_threshold": true,
     "seed": 42
+  },
+  {
+    "timestamp": "2026-06-28T16:48:00",
+    "group": "weight_tying",
+    "label": "weight_tying=False",
+    "swept_key": "weight_tying",
+    "swept_value": false,
+    "lr": 0.0005,
+    "config": {
+      "pos_emb_size": 1024,
+      "d_model": 384,
+      "n_heads": 8,
+      "num_layers": 6,
+      "ff_dim": 2048,
+      "dropout": 0.1,
+      "weight_tying": false
+    },
+    "n_params": 52050769,
+    "epochs_run": 7,
+    "best_epoch": 3,
+    "best_dev_ppl": 36.8585,
+    "test_ppl": 33.069,
+    "passes_threshold": true,
+    "seed": 42
+  },
+  {
+    "timestamp": "2026-06-28T18:20:42",
+    "group": "weight_tying",
+    "label": "weight_tying=True",
+    "swept_key": "weight_tying",
+    "swept_value": true,
+    "lr": 0.0005,
+    "config": {
+      "pos_emb_size": 1024,
+      "d_model": 384,
+      "n_heads": 8,
+      "num_layers": 6,
+      "ff_dim": 2048,
+      "dropout": 0.1,
+      "weight_tying": true
+    },
+    "n_params": 32752081,
+    "epochs_run": 20,
+    "best_epoch": 16,
+    "best_dev_ppl": 44.473,
+    "test_ppl": 39.4504,
+    "passes_threshold": true,
+    "seed": 42
   }
 ]
