@@ -1,6 +1,6 @@
 # Osservazioni esperimenti - LM Part 1.A
 
-_Generato automaticamente da main.py. Ultimo aggiornamento: 2026-06-28T11:15:23._
+_Generato automaticamente da main.py. Ultimo aggiornamento: 2026-06-28T13:04:42._
 
 Vincolo della consegna: **PPL test < 250**. La modifica va tenuta solo se migliora (o non peggiora) la PPL; gli esperimenti falliti vanno comunque commentati nel report.
 
@@ -68,6 +68,9 @@ _Step 1 - Iperparametri: dimensione del feed-forward (ff_dim)._
 | 512 | 0.0005 | 44,963,665 | 6 | 38.86 | 35.28 | sì |  |
 | 1024 | 0.0005 | 47,326,033 | 6 | 37.99 | 34.66 | sì |  |
 | 2048 | 0.0005 | 52,050,769 | 6 | 37.39 | 33.84 | sì | ⭐ |
+| 512 | 0.0005 | 44,963,665 | 6 | 38.86 | 35.28 | sì |  |
+| 1024 | 0.0005 | 47,326,033 | 6 | 37.99 | 34.66 | sì |  |
+| 2048 | 0.0005 | 52,050,769 | 6 | 37.39 | 33.84 | sì |  |
 
 - Osservazione: il valore migliore (scelto sul dev) e' **2048** (dev PPL 37.39, test PPL 33.84); il peggiore 512 (dev PPL 38.86), un divario di 1.47 punti di dev PPL.
 - Note (da completare nel report): 
