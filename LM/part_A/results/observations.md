@@ -1,6 +1,6 @@
 # Osservazioni esperimenti - LM Part 1.A
 
-_Generato automaticamente da main.py. Ultimo aggiornamento: 2026-06-28T13:04:42._
+_Generato automaticamente da main.py. Ultimo aggiornamento: 2026-06-28T16:05:36._
 
 Vincolo della consegna: **PPL test < 250**. La modifica va tenuta solo se migliora (o non peggiora) la PPL; gli esperimenti falliti vanno comunque commentati nel report.
 
@@ -73,5 +73,17 @@ _Step 1 - Iperparametri: dimensione del feed-forward (ff_dim)._
 | 2048 | 0.0005 | 52,050,769 | 6 | 37.39 | 33.84 | sì |  |
 
 - Osservazione: il valore migliore (scelto sul dev) e' **2048** (dev PPL 37.39, test PPL 33.84); il peggiore 512 (dev PPL 38.86), un divario di 1.47 punti di dev PPL.
+- Note (da completare nel report): 
+
+## dropout
+_Step 2 - Dropout nei 4 punti della rete._
+
+| valore | lr | params | epoche | best dev PPL | test PPL | <250 | |
+|---|---|---|---|---|---|---|---|
+| 0.0 | 0.0005 | 52,050,769 | 6 | 37.48 | 33.82 | sì |  |
+| 0.1 | 0.0005 | 52,050,769 | 7 | 37.46 | 33.72 | sì | ⭐ |
+| 0.2 | 0.0005 | 52,050,769 | 8 | 37.75 | 33.65 | sì |  |
+
+- Osservazione: il valore migliore (scelto sul dev) e' **0.1** (dev PPL 37.46, test PPL 33.72); il peggiore 0.2 (dev PPL 37.75), un divario di 0.29 punti di dev PPL.
 - Note (da completare nel report): 
 

@@ -454,5 +454,77 @@
     "test_ppl": 33.843,
     "passes_threshold": true,
     "seed": 42
+  },
+  {
+    "timestamp": "2026-06-28T14:55:12",
+    "group": "dropout",
+    "label": "dropout=0.0",
+    "swept_key": "dropout",
+    "swept_value": 0.0,
+    "lr": 0.0005,
+    "config": {
+      "pos_emb_size": 1024,
+      "d_model": 384,
+      "n_heads": 8,
+      "num_layers": 6,
+      "ff_dim": 2048,
+      "dropout": 0.0,
+      "weight_tying": false
+    },
+    "n_params": 52050769,
+    "epochs_run": 6,
+    "best_epoch": 2,
+    "best_dev_ppl": 37.4833,
+    "test_ppl": 33.8163,
+    "passes_threshold": true,
+    "seed": 42
+  },
+  {
+    "timestamp": "2026-06-28T15:27:59",
+    "group": "dropout",
+    "label": "dropout=0.1",
+    "swept_key": "dropout",
+    "swept_value": 0.1,
+    "lr": 0.0005,
+    "config": {
+      "pos_emb_size": 1024,
+      "d_model": 384,
+      "n_heads": 8,
+      "num_layers": 6,
+      "ff_dim": 2048,
+      "dropout": 0.1,
+      "weight_tying": false
+    },
+    "n_params": 52050769,
+    "epochs_run": 7,
+    "best_epoch": 3,
+    "best_dev_ppl": 37.4573,
+    "test_ppl": 33.7222,
+    "passes_threshold": true,
+    "seed": 42
+  },
+  {
+    "timestamp": "2026-06-28T16:05:36",
+    "group": "dropout",
+    "label": "dropout=0.2",
+    "swept_key": "dropout",
+    "swept_value": 0.2,
+    "lr": 0.0005,
+    "config": {
+      "pos_emb_size": 1024,
+      "d_model": 384,
+      "n_heads": 8,
+      "num_layers": 6,
+      "ff_dim": 2048,
+      "dropout": 0.2,
+      "weight_tying": false
+    },
+    "n_params": 52050769,
+    "epochs_run": 8,
+    "best_epoch": 4,
+    "best_dev_ppl": 37.7479,
+    "test_ppl": 33.6541,
+    "passes_threshold": true,
+    "seed": 42
   }
 ]

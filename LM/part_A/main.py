@@ -60,7 +60,7 @@ BASE_CONFIG = dict(
     d_model=384,
     n_heads=8,
     num_layers=6,
-    ff_dim=1024,
+    ff_dim=2048,
     dropout=0.0,
     weight_tying=False,
 )
