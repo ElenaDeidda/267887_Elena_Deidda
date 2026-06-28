@@ -238,5 +238,77 @@
     "test_ppl": 35.0325,
     "passes_threshold": true,
     "seed": 42
+  },
+  {
+    "timestamp": "2026-06-28T08:46:55",
+    "group": "num_layers",
+    "label": "num_layers=2",
+    "swept_key": "num_layers",
+    "swept_value": 2,
+    "lr": 0.0005,
+    "config": {
+      "pos_emb_size": 1024,
+      "d_model": 384,
+      "n_heads": 8,
+      "num_layers": 2,
+      "ff_dim": 1024,
+      "dropout": 0.0,
+      "weight_tying": false
+    },
+    "n_params": 41803089,
+    "epochs_run": 6,
+    "best_epoch": 2,
+    "best_dev_ppl": 41.5616,
+    "test_ppl": 37.5663,
+    "passes_threshold": true,
+    "seed": 42
+  },
+  {
+    "timestamp": "2026-06-28T09:11:50",
+    "group": "num_layers",
+    "label": "num_layers=4",
+    "swept_key": "num_layers",
+    "swept_value": 4,
+    "lr": 0.0005,
+    "config": {
+      "pos_emb_size": 1024,
+      "d_model": 384,
+      "n_heads": 8,
+      "num_layers": 4,
+      "ff_dim": 1024,
+      "dropout": 0.0,
+      "weight_tying": false
+    },
+    "n_params": 44564561,
+    "epochs_run": 6,
+    "best_epoch": 2,
+    "best_dev_ppl": 38.7051,
+    "test_ppl": 35.0325,
+    "passes_threshold": true,
+    "seed": 42
+  },
+  {
+    "timestamp": "2026-06-28T09:38:38",
+    "group": "num_layers",
+    "label": "num_layers=6",
+    "swept_key": "num_layers",
+    "swept_value": 6,
+    "lr": 0.0005,
+    "config": {
+      "pos_emb_size": 1024,
+      "d_model": 384,
+      "n_heads": 8,
+      "num_layers": 6,
+      "ff_dim": 1024,
+      "dropout": 0.0,
+      "weight_tying": false
+    },
+    "n_params": 47326033,
+    "epochs_run": 6,
+    "best_epoch": 2,
+    "best_dev_ppl": 37.9884,
+    "test_ppl": 34.6564,
+    "passes_threshold": true,
+    "seed": 42
   }
 ]
