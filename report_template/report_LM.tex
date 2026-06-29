@@ -21,55 +21,64 @@
 \maketitle
 
 \section{Introduction}
-I tackle word-level language modeling on the Penn TreeBank corpus, evaluated
-with perplexity (PPL). In Part~A I train a GPT-2-style decoder-only
-Transformer~\cite{vaswani2017} \emph{from scratch}, improving it step by step
-through learning-rate and architecture search, dropout and a weight-tying
-ablation, lowering the test PPL from 35.68 to 33.07. In Part~B I fine-tune the
-\emph{pre-trained} GPT-2 with a hand-implemented LoRA, training only low-rank
-adapters on the $Q,K,V$ projections while the 124M backbone stays frozen,
-reaching test PPL 19.14. Both parts satisfy PPL${<}250$, and Part~B clearly
-benefits from starting from a pre-trained model.
+This project compares two strategies for word-level language modeling on the
+Penn TreeBank corpus, evaluated with perplexity (PPL): training a Transformer
+\emph{from scratch} (Part~A) versus fine-tuning a \emph{pre-trained} model
+with a hand-implemented adapter (Part~B). For Part~A, a GPT-2-style
+decoder-only Transformer~\cite{vaswani2017} is improved incrementally
+through a learning-rate and architecture search, dropout, and a weight-tying
+ablation, lowering test PPL from 35.68 to 33.07. For Part~B, the pre-trained
+GPT-2 is fine-tuned with LoRA, training only low-rank adapters on the
+$Q,K,V$ projections while the 124M backbone stays frozen, reaching test PPL
+19.14. Both parts satisfy PPL${<}250$, and Part~B improves on Part~A by 42\%
+relative, training only 0.7\% of the parameters.
 
 \section{Implementation details}
 Sentences are tokenized with the GPT-2 BPE tokenizer and padded on the right
 (padding ignored in the loss); PPL is the exponential of the per-token
-cross-entropy. Every experiment follows a greedy, one-change-at-a-time search,
-selected on \emph{dev} PPL, with AdamW, gradient clipping and early stopping.
+cross-entropy. Every experiment follows a greedy, one-change-at-a-time
+search, selected on \emph{dev} PPL.
 
-\textbf{Part A.} Search order: learning rate (on the smallest model), then the
-architecture one hyper-parameter at a time (\texttt{d\_model}, heads, layers,
-FFN size), then dropout, then a weight-tying ablation
-(\texttt{lm\_head} tied to the token embedding)~\cite{press2017}. Tying did
-\emph{not} help here: the tied model needed 20 epochs to converge against 7
-for the untied one, and reached a worse PPL despite ${\sim}19$M fewer
-parameters, so I keep the untied model as final. The fact that the tied model
-needs almost three times as many epochs to converge, while still reaching a
-worse PPL, suggests that the constraint makes optimization harder (conflicting
-gradients between the embedding and output-projection roles) more than the
-parameter reduction helps generalization -- an effect likely tied to the
-combination of a pre-norm Transformer architecture and a small training
-corpus, unlike the LSTM setting of the original weight-tying study.
+\textbf{Part A.} The search order is learning rate, then architecture
+(\texttt{d\_model}, heads, layers, FFN size, one at a time), then dropout,
+then a weight-tying ablation
+(\texttt{lm\_head} tied to the token embedding)~\cite{press2017}. Tying does
+\emph{not} help here: the tied model needs 20 epochs to converge against 7
+for the untied one, reaching a worse PPL despite ${\sim}19$M fewer parameters
+(dev PPL 44.47 vs.\ 36.86). Sharing the embedding and output projection
+forces a single matrix to serve two conflicting roles -- representing an
+input token and scoring output tokens -- which makes convergence harder,
+more than the smaller parameter count helps generalization. The corpus is
+not large enough relative to model size for overfitting to be the main
+concern here, so removing parameters offers little benefit. Among the other
+changes, increasing depth (\texttt{num\_layers} 2$\to$6) gives the largest
+single gain in the architecture step (dev PPL 41.56$\to$37.99).
 
 \textbf{Part B.} LoRA~\cite{hu2022} is implemented manually: each attention
 layer injects low-rank matrices $A,B$ into $Q,K,V$, computing
 $\Delta Wx=(\alpha/r)BAx$. $A\sim\mathcal{N}(0,1)$, $B$ is zero-initialized, so
 training starts exactly from the pre-trained model; only the adapters train
-(0.7\% of parameters at rank 16). HuggingFace's internal label shifting is
-used, so labels are not shifted manually as in Part~A. Search order: learning
-rate (rank 4, $\alpha{=}8$ fixed), then rank $r\in\{4,8,16\}$ ($\alpha{=}2r$),
-then $\alpha$ at the best rank.
+(0.7\% of parameters at rank 16). The search order is learning rate (rank 4,
+$\alpha{=}8$ fixed), then rank $r\in\{4,8,16\}$, then $\alpha$ at the best
+rank. PPL decreases monotonically with rank, as a larger rank gives the
+adapter more capacity to adjust the frozen backbone. A lower-than-default
+scaling ($\alpha{=}8$ at rank 16) then gives the best result: since GPT-2 is
+already pre-trained on a far larger corpus than PTB, a smaller update keeps
+the fine-tuned model closer to the pre-trained one, preserving more of its
+general linguistic knowledge.
 
 \section{Results}
-Models are selected on dev PPL and scored on test PPL. Table~\ref{tab:lma} and
-Figure~\ref{fig:lma} trace Part~A: every step except weight tying improves
-test PPL. Within the architecture step, doubling \texttt{n\_heads} (4$\to$8)
-helped at no parameter cost, while halving \texttt{num\_layers} (4$\to$2)
-clearly hurt (test PPL 37.57, not shown). Table~\ref{tab:lmb} reports Part~B:
-PPL decreases monotonically with rank, and a smaller-than-default scaling
-($\alpha{=}8$ at rank 16) gives the best result, test PPL 19.14 -- a 42\%
-relative improvement over the best from-scratch model while training only
-0.88M of 125M parameters.
+Hyper-parameters are always selected on dev PPL, and test PPL is reported
+only for the selected configuration, to avoid test-set leakage. Table~\ref{tab:lma}
+and Figure~\ref{fig:lma} trace Part~A: every step except weight tying
+improves test PPL, with depth and FFN size contributing the largest gains.
+Table~\ref{tab:lmb} reports Part~B: PPL decreases monotonically with rank,
+and a smaller scaling at the best rank gives the lowest test PPL, 19.14.
+Comparing the two parts, Part~B improves on the best from-scratch model by
+42\% relative while training only 0.88M of 125M parameters: this gap is
+attributable to the pre-trained backbone already encoding general English
+syntax and semantics from a far larger corpus, with LoRA only specializing
+that knowledge to PTB, rather than to the fine-tuning technique itself.
 
 \begin{figure}[t]
   \centering
@@ -117,5 +126,10 @@ relative improvement over the best from-scratch model while training only
 
 \bibliographystyle{IEEEtran}
 \bibliography{mybib}
+
+\noindent{\footnotesize\textit{Declaration of AI use: a generative-AI assistant
+was used to help refactor the experiment scripts and to edit the language of
+this report. All architectural choices, experiments and results are the
+author's own.}}
 
 \end{document}
