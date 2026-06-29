@@ -1,27 +1,3 @@
-# main.py
-# Part 2.B - Fine-tuning di BERT (base+large) e GPT-2 (base+medium) per intent + slot su ATIS.
-#
-# Per OGNI famiglia (bert, gpt2):
-#   Step 0 - ricerca greedy del learning rate sul modello BASE
-#   Step 1 - ricerca greedy del dropout sul modello BASE (con il miglior lr)
-#   Step 2 - esperimento singolo sul modello LARGE/MEDIUM con la config migliore
-#
-# bert-base e bert-large condividono lo stesso tokenizer WordPiece (stesso vocab),
-# idem gpt2 e gpt2-medium (BPE): i DataLoader costruiti per il base valgono anche
-# per la variante large/medium.
-#
-# Selezione sulla DEV F1; ogni configurazione e' ripetuta su piu' run
-# (media +- std di Slot F1 conll e Intent Accuracy).
-# Risultati in results/results.json e observations.md. Modelli migliori in bin/.
-#
-# Uso:
-#   python main.py
-#   python main.py --models bert gpt2 --runs 3 --epochs 30
-#   python main.py --notify <topic_ntfy> --shutdown   # comodo sulla VM
-#
-# ----------------------------------------------------------------------------------
-# English summary (module purpose and key rationale)
-# ----------------------------------------------------------------------------------
 # This is the entry point and experiment orchestrator for Part 2.B. For each
 # model family (bert: bert-base-uncased -> bert-large-uncased; gpt2:
 # openai-community/gpt2 -> gpt2-medium) it runs, in a single command, a fully

@@ -77,8 +77,21 @@ despite 3$\times$ more parameters, suggesting ATIS is already saturated by
 base-sized pre-trained models. Figure~\ref{fig:params} makes this explicit:
 moving from a from-scratch model to a pre-trained one yields a large jump in
 Slot F1, while further scaling within Part~B yields essentially none.
-Figure~\ref{fig:errorbars} shows the seed-to-seed variability (mean$\pm$std)
-behind every final model in Tables~\ref{tab:nlua}--\ref{tab:nlub}.
+
+\textbf{Error analysis.} Beyond aggregate scores, Figure~\ref{fig:perslot}
+breaks down test Slot F1 by slot type for the two best fine-tuned models. On
+the most frequent slots both are strong, but BERT's advantage widens precisely
+on slots whose interpretation depends on context from \emph{both} sides --
+\texttt{airline\_name} (0.99 vs.\ 0.86), \texttt{depart\_time.period\_of\_day},
+\texttt{aircraft\_code}, \texttt{class\_type} -- confirming that bidirectional
+attention, not scale, drives the gap, since GPT-2-medium already has 3$\times$
+BERT-base's parameters. The hardest slot for both is the generic
+\texttt{city\_name} (F1 0.64/0.55), routinely confused with the directional
+\texttt{fromloc}/\texttt{toloc.city\_name}. Intent classification is by contrast
+nearly solved: the best BERT misclassifies only 23 of 893 test utterances, and
+the residual errors (Figure~\ref{fig:intentcm}) are dominated by compound
+intents such as \texttt{flight+airfare} collapsing onto their majority
+component \texttt{flight}, rather than genuine semantic confusions.
 
 \begin{table}[t]
   \centering
@@ -138,10 +151,20 @@ behind every final model in Tables~\ref{tab:nlua}--\ref{tab:nlub}.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{nlu_errorbars_final.png}
-  \caption{Final models: test Slot F1 and Intent Accuracy, mean$\pm$std
-           over seeds.}
-  \label{fig:errorbars}
+  \includegraphics[width=\linewidth]{nlu_perslot_f1.png}
+  \caption{Per-slot test Slot F1 (slots with support $\geq20$, $n$ = test
+           occurrences): BERT vs.\ GPT-2-medium. The gap widens on
+           context-dependent slots, not on the most frequent ones.}
+  \label{fig:perslot}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{nlu_intent_confusion.png}
+  \caption{Intent confusion (row-normalized recall) of the best BERT on the
+           ATIS test set; cells show raw counts. Only 23/893 errors, mostly
+           compound intents mapped to \texttt{flight}.}
+  \label{fig:intentcm}
 \end{figure}
 
 \bibliographystyle{IEEEtran}

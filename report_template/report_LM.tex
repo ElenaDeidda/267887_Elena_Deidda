@@ -74,13 +74,12 @@ PTB-specific fit.
 \section{Results}
 Hyper-parameters are always selected on dev PPL, and test PPL is reported
 only for the selected configuration, to avoid test-set leakage. Table~\ref{tab:lma}
-and Figure~\ref{fig:lma} trace Part~A: every step except weight tying
+traces Part~A: every step except weight tying
 improves test PPL, with depth and FFN size contributing the largest gains.
 Table~\ref{tab:lmb} reports Part~B: PPL decreases monotonically with rank,
 and at the best rank a default scaling ($\alpha{=}r$) gives the lowest dev
 PPL (21.01), the selected configuration, with test PPL 19.15.
-Figure~\ref{fig:lmb} traces the Part~B search step by step, the direct
-counterpart of Figure~\ref{fig:lma}. Comparing the two parts, Part~B improves
+Comparing the two parts, Part~B improves
 on the best from-scratch model by 42\% relative while training only 0.88M of
 125M parameters: Figure~\ref{fig:params} makes this explicit, with the LoRA
 models reaching far lower test PPL than any from-scratch model despite two
@@ -93,13 +92,6 @@ fine-tuning technique itself. The two regimes also differ in convergence
 within ${\sim}2$ epochs and then overfit, whereas the LoRA adapters, far
 harder to overfit on a frozen backbone, keep improving up to epochs
 ${\sim}14$--$20$.
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\linewidth]{partA_ppl_steps.png}
-  \caption{Part~A: dev and test PPL after each incremental search step.}
-  \label{fig:lma}
-\end{figure}
 
 \begin{table}[t]
   \centering
@@ -138,14 +130,6 @@ ${\sim}14$--$20$.
     \bottomrule
   \end{tabular}
 \end{table}
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\linewidth]{partB_ppl_steps.png}
-  \caption{Part~B: dev and test PPL after each incremental search step
-           (learning rate, rank, then $\alpha$).}
-  \label{fig:lmb}
-\end{figure}
 
 \begin{figure}[t]
   \centering

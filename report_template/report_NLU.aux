@@ -6,20 +6,23 @@
 \bibstyle{IEEEtran}
 \bibdata{mybib}
 \bibcite{devlin2019}{1}
-\bibcite{radford2019}{2}
-\bibcite{chen2019}{3}
-\@writefile{toc}{\contentsline {section}{\numberline {1} Introduction}{1}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {2} Implementation details}{1}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {3} Results}{1}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Part\nobreakspace  {}A --- best model per step (231K param. throughout). Final: $d{=}64$, 4 heads, 2 layers, FFN 256, dropout 0.\relax }}{1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {1} Introduction}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2} Implementation details}{1}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3} Results}{1}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Part\nobreakspace  {}A --- best model per step (231K param. throughout). Final: $d{=}64$, 4 heads, 2 layers, FFN 256, dropout 0.\relax }}{1}{}\protected@file@percent }
 \providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
 \newlabel{tab:nlua}{{1}{1}}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Part\nobreakspace  {}A: dev F1 of every architecture candidate against the incumbent score (dashed line); only \texttt  {n\_heads}$=$4 wins.\relax }}{1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Part\nobreakspace  {}A: dev F1 of every architecture candidate against the incumbent score (dashed line); only \texttt  {n\_heads}$=$4 wins.\relax }}{1}{}\protected@file@percent }
 \newlabel{fig:nlua}{{1}{1}}
-\@writefile{toc}{\contentsline {section}{\numberline {4} References}{1}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Part\nobreakspace  {}B --- fine-tuning (best lr/dropout per family).\relax }}{2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4} References}{1}{}\protected@file@percent }
+\bibcite{radford2019}{2}
+\bibcite{chen2019}{3}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Part\nobreakspace  {}B --- fine-tuning (best lr/dropout per family).\relax }}{2}{}\protected@file@percent }
 \newlabel{tab:nlub}{{2}{2}}
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Test Slot F1 vs.\ parameter count (log scale): the jump from Part\nobreakspace  {}A to Part\nobreakspace  {}B dwarfs any gain from scaling within Part\nobreakspace  {}B.\relax }}{2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Test Slot F1 vs.\ parameter count (log scale): the jump from Part\nobreakspace  {}A to Part\nobreakspace  {}B dwarfs any gain from scaling within Part\nobreakspace  {}B.\relax }}{2}{}\protected@file@percent }
 \newlabel{fig:params}{{2}{2}}
-\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Final models: test Slot F1 and Intent Accuracy, mean$\pm $std over seeds.\relax }}{2}\protected@file@percent }
-\newlabel{fig:errorbars}{{3}{2}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Per-slot test Slot F1 (slots with support $\geq 20$, $n$ = test occurrences): BERT vs.\ GPT-2-medium. The gap widens on context-dependent slots, not on the most frequent ones.\relax }}{2}{}\protected@file@percent }
+\newlabel{fig:perslot}{{3}{2}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Intent confusion (row-normalized recall) of the best BERT on the ATIS test set; cells show raw counts. Only 23/893 errors, mostly compound intents mapped to \texttt  {flight}.\relax }}{2}{}\protected@file@percent }
+\newlabel{fig:intentcm}{{4}{2}}
+\gdef \@abspage@last{2}
