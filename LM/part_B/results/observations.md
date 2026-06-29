@@ -1,6 +1,6 @@
 # Osservazioni esperimenti - LM Part 1.B (LoRA)
 
-_Generato automaticamente da main.py. Ultimo aggiornamento: 2026-06-29T14:08:53._
+_Generato automaticamente da main.py. Ultimo aggiornamento: 2026-06-29T16:26:19._
 
 Vincolo della consegna: **PPL test < 250**.
 
@@ -42,6 +42,7 @@ _Step 2 - Alpha (a parita' del miglior rank; scaling = alpha/rank)._
 |---|---|---|---|---|---|---|---|---|---|
 | step2_alpha_half | 16 | 8 | 0.5 | 0.0005 | 20 | 21.03 | 19.14 | si |  |
 | step2_alpha_eq | 16 | 16 | 1.0 | 0.0005 | 20 | 21.01 | 19.15 | si | * |
+| step2_alpha_2x | 16 | 32 | 2.0 | 0.0005 | 19 | 21.20 | 19.35 | si |  |
 
 - Osservazione (scelta sul dev): migliore `step2_alpha_eq` (dev PPL 21.01, test PPL 19.15).
 - Note (da completare nel report): 

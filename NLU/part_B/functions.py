@@ -9,6 +9,33 @@
 #     arrivano da batch['words'].
 #   - Il batch mescola tensori e liste Python ('words'): .to(device) solo sui tensori.
 #   - model_type ('bert'/'gpt2') sceglie la firma del forward.
+#
+# ----------------------------------------------------------------------------------
+# English summary (module purpose and key rationale)
+# ----------------------------------------------------------------------------------
+# This module implements the training loop, evaluation loop, multi-seed
+# experiment runner, and JSON/Markdown experiment logging for Part 2.B's
+# BERT/GPT-2 fine-tuning. Compared to Part 2.A (training from scratch):
+#   - The slot-filling loss uses ignore_index=IGNORE_INDEX (-100) so that
+#     positions which are not the first sub-token of a word (and special
+#     tokens / padding) never contribute to the loss — see utils.py for how
+#     these labels are produced.
+#   - Decoding predicted slots back to words uses the mask (y_slots != -100)
+#     to recover exactly the first-sub-token positions per word, instead of
+#     Part 2.A's simpler "slots_len - 1" trick (which assumed one token per
+#     word). The original word strings travel through the batch dict
+#     ('words', a Python list, not a tensor) so they can be re-attached to
+#     predictions for the conll evaluator.
+#   - model_type ("bert" or "gpt2") selects which forward signature to call,
+#     since BERTforNLU and GPT2forNLU take different positional arguments
+#     (see model.py: BERT needs token_type_ids, GPT-2 needs seq_lens to find
+#     its last-real-token position for intent classification).
+#
+# IGNORE_INDEX (-100) here is purely a loss-masking sentinel for
+# CrossEntropyLoss; it is unrelated to PAD_TOKEN (the slot-vocabulary "pad"
+# id defined in utils.py), which is a real vocabulary entry, not a
+# loss-skipping signal. See utils.py's module docstring for the full
+# distinction.
 
 import os
 import json
@@ -31,13 +58,26 @@ IGNORE_INDEX = -100
 
 
 def _to_device(batch, device):
-    """Sposta su device solo i tensori (lascia 'words', che e' una lista Python)."""
+    """Sposta su device solo i tensori (lascia 'words', che e' una lista Python).
+
+    English: Moves every tensor-valued entry of the batch dict to `device`,
+    leaving non-tensor entries (notably 'words', a list of Python lists of
+    strings) untouched, since .to(device) only applies to torch.Tensor.
+    """
     return {k: (v.to(device) if isinstance(v, torch.Tensor) else v)
             for k, v in batch.items()}
 
 
 def _forward(model, batch, model_type):
-    """Chiama il forward giusto in base al tipo di modello."""
+    """Chiama il forward giusto in base al tipo di modello.
+
+    English: Dispatches to the correct forward() signature depending on the
+    backbone: BERTforNLU expects (input_ids, attention_mask, token_type_ids),
+    while GPT2forNLU expects (input_ids, attention_mask, seq_lens) — GPT-2
+    needs seq_lens instead of token_type_ids because it must locate each
+    example's true last token (see model.py) rather than rely on a fixed
+    [CLS] position.
+    """
     if model_type == "bert":
         return model(batch["input_ids"], batch["attention_mask"], batch["token_type_ids"])
     return model(batch["input_ids"], batch["attention_mask"], batch["seq_lens"])
@@ -48,7 +88,15 @@ def _forward(model, batch, model_type):
 # ----------------------------------------------------------------------------
 
 def train_loop(data, optimizer, criterion_slots, criterion_intents, model, model_type="bert"):
-    """Una epoca di training (BERT o GPT-2). Restituisce la lista delle loss per batch."""
+    """Una epoca di training (BERT o GPT-2). Restituisce la lista delle loss per batch.
+
+    English: Runs one full training epoch over `data` (a DataLoader) for
+    either backbone, depending on model_type. The total loss per batch is the
+    sum of the intent loss (criterion_intents) and the slot-filling loss
+    (criterion_slots, which must be constructed with ignore_index=IGNORE_INDEX
+    by the caller so that non-first sub-tokens/special tokens/padding are
+    excluded). Returns the list of per-batch scalar losses (for logging).
+    """
     model.train()
     loss_array = []
     device = next(model.parameters()).device
@@ -79,6 +127,14 @@ def eval_loop(data, criterion_slots, criterion_intents, model, lang, model_type=
     in batch['words'].
 
     Returns: results (conll), report_intent (classification_report), loss_array.
+
+    English: Runs inference over `data` with no gradient updates (model.eval()
+    + torch.no_grad()) and computes both intent and slot-filling metrics.
+    For slots, the mask (y_slots != IGNORE_INDEX) recovers exactly the
+    first-sub-token positions that carry a real label, which is then
+    realigned 1:1 with the original word strings from batch['words'] so the
+    chunk-level conll.evaluate() (imported from conll.py) can score
+    predictions at the word/chunk level rather than the sub-token level.
     """
     model.eval()
     loss_array = []
@@ -109,12 +165,19 @@ def eval_loop(data, criterion_slots, criterion_intents, model, lang, model_type=
                 words = batch["words"][id_seq]
                 y = batch["y_slots"][id_seq]      # -100 nelle posizioni ignorate
                 preds = output_slots[id_seq]
+                # Boolean mask selecting exactly the first-sub-token (real
+                # label) positions: everything else (extra sub-tokens,
+                # [CLS]/[SEP] or EOS, padding) was set to IGNORE_INDEX
+                # upstream in utils.py and is excluded here too.
                 mask = (y != IGNORE_INDEX)
 
                 real_gt_ids = y[mask].tolist()
                 real_pred_ids = preds[mask].tolist()
 
                 n_real = len(real_gt_ids)          # < len(words) se troncato
+                # Words and the (masked) label/prediction sequences are kept
+                # in the same order, so zipping them by index after masking
+                # correctly realigns each prediction with its source word.
                 words_aligned = words[:n_real]
 
                 ref_slots.append([(words_aligned[j], lang.id2slot[real_gt_ids[j]])
@@ -142,7 +205,17 @@ def train_model(model, train_loader, dev_loader, lang, optimizer,
                 criterion_slots, criterion_intents,
                 model_type="bert", n_epochs=30, patience=3, experiment_name="exp"):
     """Early stopping sulla slot F1 di dev. Il fine-tuning converge in poche epoche.
-    Restituisce (best_model su CPU, best_dev_f1, best_dev_acc)."""
+    Restituisce (best_model su CPU, best_dev_f1, best_dev_acc).
+
+    English: Trains for up to n_epochs, evaluating on dev after every epoch
+    and tracking the best dev chunk-level Slot F1 seen so far. If dev F1 does
+    not improve for `patience` consecutive epochs, training stops early
+    (fine-tuning a pre-trained backbone typically converges within a handful
+    of epochs, unlike training from scratch). The best model snapshot is
+    deep-copied to CPU on every improvement (to avoid holding GPU memory for
+    a snapshot while training continues), and returned along with its dev
+    Slot F1 and dev Intent Accuracy.
+    """
     best_f1 = 0.0
     best_acc = 0.0
     best_model = None
@@ -182,7 +255,20 @@ def run_experiments(make_datasets, lang, slots_size, n_intents,
                     n_runs=3, n_epochs=30, patience=3,
                     experiment_name="exp", seed=42, device="cpu"):
     """n_runs fine-tuning indipendenti e media +- std. `make_datasets()` ricrea i
-    tre loader (utile per il seed). Riporta anche la media della dev F1 (selezione)."""
+    tre loader (utile per il seed). Riporta anche la media della dev F1 (selezione).
+
+    English: Repeats a full fine-tuning + evaluation cycle n_runs times (each
+    with a different seed = seed + run_idx) for one fixed (lr, dropout,
+    model_name) configuration, then aggregates test Slot F1 / Intent Accuracy
+    as mean +- std across runs — this multi-seed averaging is what protects
+    the greedy hyperparameter search in main.py from selecting a winner that
+    only looked good due to a lucky seed. `make_datasets()` is a callable
+    (not a fixed loader) so it can be invoked once per run if re-creation
+    were ever needed; here it returns the same pre-built loaders since
+    seeding affects model init/training, not the data construction itself.
+    Also reports the mean dev Slot F1, which is the actual signal used for
+    hyperparameter selection in main.py's greedy search.
+    """
     criterion_slots = nn.CrossEntropyLoss(ignore_index=IGNORE_INDEX)
     criterion_intents = nn.CrossEntropyLoss()
 
@@ -255,6 +341,8 @@ def run_experiments(make_datasets, lang, slots_size, n_intents,
 # ----------------------------------------------------------------------------
 
 def load_results(path):
+    """Loads the JSON list of previously logged experiment records, or an
+    empty list if the results file does not exist yet."""
     if not os.path.exists(path):
         return []
     with open(path, "r") as f:
@@ -262,10 +350,15 @@ def load_results(path):
 
 
 def done_experiments(path):
+    """Returns the set of experiment names already logged in `path`, used by
+    main.py's idempotent skip-if-done pattern so reruns don't repeat work."""
     return {r["experiment"] for r in load_results(path)}
 
 
 def append_result(path, record):
+    """Appends one experiment record to the JSON results file, creating the
+    parent directory and file if needed, and rewrites the full file (the
+    results list is small enough that this is simpler than incremental I/O)."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     results = load_results(path)
     results.append(record)
@@ -275,6 +368,9 @@ def append_result(path, record):
 
 
 def make_record(experiment, param, info, seed=42):
+    """Builds a single experiment log record: a timestamp, the experiment
+    name, which hyperparameter was being searched (`param`), the base seed,
+    and the metrics dict (`info`) returned by run_experiments."""
     rec = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "experiment": experiment, "param": param, "seed": seed,
@@ -285,7 +381,15 @@ def make_record(experiment, param, info, seed=42):
 
 def regenerate_observations_md(results_path, md_path):
     """Rigenera il report Markdown, raggruppando per modello (BERT vs GPT-2).
-    Selezione del migliore sulla DEV F1; metriche di test (media +- std) riportate."""
+    Selezione del migliore sulla DEV F1; metriche di test (media +- std) riportate.
+
+    English: Regenerates a human-readable Markdown summary of all logged
+    experiments, grouped by model family (bert vs gpt2), highlighting the
+    overall-best and per-family-best configuration. Hyperparameter selection
+    is always based on dev Slot F1 (dev_f1_mean); test metrics (mean +- std
+    across the multi-seed runs) are reported for reference but are not used
+    to pick the winner, to keep the test set held out from model selection.
+    """
     results = load_results(results_path)
     os.makedirs(os.path.dirname(md_path) or ".", exist_ok=True)
 

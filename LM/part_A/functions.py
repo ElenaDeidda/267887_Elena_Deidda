@@ -1,14 +1,16 @@
 # functions.py
-# Funzioni di supporto: loop di training, loop di valutazione (con Perplexity),
-# inizializzazione dei pesi e una funzione "run_experiment" che incapsula un
-# esperimento completo (costruzione modello -> training con early stopping ->
-# valutazione sul test set). main.py usa queste funzioni.
+# -----------------------------------------------------------------------------
+# Training/evaluation engine for Part 1.A: the per-epoch training loop, the
+# Perplexity evaluation loop, weight initialization, and run_experiment(),
+# which wraps one full experiment (build model -> train with early stopping
+# on dev PPL -> report test PPL). main.py drives these functions for the
+# incremental hyperparameter search.
 #
-# In piu' ci sono utility per il LOGGING degli esperimenti:
-#   - append_result / load_results: salvano ogni run in results/results.json
-#   - regenerate_observations_md:   rigenera results/observations.md (tabelle +
-#                                   osservazioni automatiche) per aiutare a
-#                                   scrivere il report.
+# Also includes experiment-LOGGING utilities:
+#   - append_result / load_results: persist every run to results/results.json
+#   - regenerate_observations_md:   regenerate results/observations.md (per-
+#                                   sweep tables + auto-generated observations)
+#                                   to help write up the report.
 
 import copy
 import json
@@ -24,12 +26,12 @@ from tqdm import tqdm
 
 from model import GPT2
 
-# Soglia richiesta dalla consegna (PPL test deve stare sotto)
+# PPL threshold required by the assignment (test PPL must stay below this).
 PPL_THRESHOLD = 250
 
 
 def set_seed(seed=42):
-    """Fissa i semi per rendere gli esperimenti riproducibili."""
+    """Seed all RNGs used (Python random, torch CPU/CUDA) for reproducibility."""
     random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -37,35 +39,70 @@ def set_seed(seed=42):
 
 
 def count_params(model):
-    """Numero totale di parametri (i pesi condivisi col weight tying contano una volta)."""
+    """Total parameter count (weights shared via weight tying are counted once,
+    since model.parameters() de-duplicates aliased tensors)."""
     return sum(p.numel() for p in model.parameters())
 
 
 def train_loop(data, optimizer, criterion, model, device, clip=5.0):
-    """Un'epoca di training. Restituisce la loss media pesata sui token."""
+    """Run one full training epoch over `data`.
+
+    Args:
+        data: train DataLoader yielding (input_ids, labels, n_tokens) batches
+            from utils.collate_fn (still on CPU at this point).
+        optimizer, criterion: AdamW optimizer and CrossEntropyLoss
+            (ignore_index=pad_token_id) built by run_experiment.
+        model: the GPT2 model.
+        device: target device; the actual CPU->GPU transfer happens here
+            (not in collate_fn - see utils.py for why).
+        clip: max gradient norm for clipping.
+
+    Returns:
+        Token-weighted average training loss for the epoch (float). Weighting
+        by n_tokens (rather than simply averaging per-batch losses) ensures
+        batches with more non-pad tokens contribute proportionally more to
+        the reported loss, so longer sequences aren't under-weighted relative
+        to shorter/more-padded ones.
+    """
     model.train()
     loss_array = []
     number_of_tokens = []
 
     for input_ids, labels, n_tokens in data:
+        # Device transfer happens here, in the main process, not in
+        # collate_fn (which must stay CPU-only - see utils.py).
         input_ids = input_ids.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
         optimizer.zero_grad()
         output = model(input_ids)                # (B, L, vocab)
-        # CrossEntropyLoss vuole (B, vocab, L), quindi permutiamo
+        # CrossEntropyLoss expects (B, vocab, L) for sequence inputs, so permute.
         loss = criterion(output.permute(0, 2, 1), labels)
+        # Accumulate loss*n_tokens (not just loss) so that summing across
+        # batches and dividing by the total token count below yields a
+        # correctly token-weighted average over the whole epoch.
         loss_array.append(loss.item() * n_tokens)
         number_of_tokens.append(n_tokens)
         loss.backward()
-        # gradient clipping: evita gradienti che esplodono nei transformer
+        # Gradient clipping: prevents exploding gradients, a common issue
+        # when training Transformers from scratch without warmup.
         torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
         optimizer.step()
 
+    # Normalize by total non-pad token count across the whole epoch, not by
+    # number of batches, so the result is a true per-token average loss.
     return sum(loss_array) / sum(number_of_tokens)
 
 
 def eval_loop(data, eval_criterion, model, device):
-    """Valutazione senza calcolo del gradiente. Restituisce (PPL, loss media)."""
+    """Evaluate the model on `data` with gradients disabled.
+
+    Same token-weighted loss averaging as train_loop (see that docstring for
+    the rationale), used here to compute Perplexity = exp(average per-token
+    cross-entropy loss).
+
+    Returns:
+        (ppl, avg_loss): Perplexity and the token-weighted average loss.
+    """
     model.eval()
     loss_array = []
     number_of_tokens = []
@@ -78,13 +115,19 @@ def eval_loop(data, eval_criterion, model, device):
             loss_array.append(loss.item() * n_tokens)
             number_of_tokens.append(n_tokens)
 
+    # Token-weighted average loss over the whole dataset (see train_loop).
     loss_to_return = sum(loss_array) / sum(number_of_tokens)
     ppl = math.exp(loss_to_return)              # Perplexity = exp(cross-entropy)
     return ppl, loss_to_return
 
 
 def init_weights(mat):
-    """Inizializzazione uniforme dei layer lineari."""
+    """Initialize all nn.Linear layers with small uniform weights/biases.
+
+    Applied via model.apply(init_weights) instead of relying on PyTorch's
+    default initialization, for consistency/reproducibility across the many
+    incremental experiments in the hyperparameter search.
+    """
     for m in mat.modules():
         if type(m) in [nn.Linear]:
             torch.nn.init.uniform_(m.weight, -0.01, 0.01)
@@ -94,19 +137,26 @@ def init_weights(mat):
 
 def run_experiment(name, config, loaders, tokenizer, device,
                    lr=5e-4, n_epochs=100, patience=3, init=True):
-    """Esegue un esperimento completo e stampa la Perplexity finale sul test set.
+    """Run one full experiment: build model, train with early stopping, report test PPL.
 
     Args:
-        name:    etichetta dell'esperimento (stampata a video)
-        config:  dict con gli iperparametri del modello
+        name:    experiment label (used for logging/progress bar).
+        config:  dict of model hyperparameters forwarded to GPT2(**config)
                  (pos_emb_size, d_model, n_heads, num_layers, ff_dim,
-                  dropout, weight_tying)
-        loaders: tupla (train_loader, dev_loader, test_loader)
-        lr:      learning rate per AdamW
-        n_epochs, patience: parametri di training ed early stopping
+                  dropout, weight_tying).
+        loaders: tuple (train_loader, dev_loader, test_loader).
+        lr:      learning rate for AdamW.
+        n_epochs, patience: max epochs and early-stopping patience (see below).
+
+    Model selection / early stopping policy (important for correctness of the
+    reported results): the model is checkpointed (best_model) and patience is
+    tracked based ONLY on dev set PPL, NEVER on test PPL. Test PPL is computed
+    once at the very end, purely for reporting, and never influences which
+    epoch/checkpoint is kept or when training stops. This avoids any leakage
+    from the test set into model/hyperparameter selection.
 
     Returns:
-        (best_model, info) dove info e' un dict con le metriche dell'esperimento:
+        (best_model, info) where info is a dict of experiment metrics:
         test_ppl, best_dev_ppl, best_epoch, epochs_run, n_params, config, lr.
     """
     train_loader, dev_loader, test_loader = loaders
@@ -117,7 +167,10 @@ def run_experiment(name, config, loaders, tokenizer, device,
 
     model = GPT2(vocab_len, **config).to(device)
     if init:
-        # con il weight tying l'inizializzazione uniforme va bene comunque
+        # Uniform initialization is applied the same way regardless of
+        # weight_tying; when tying is enabled lm_head.weight and
+        # token_embed.weight already point to the same tensor, so this still
+        # initializes them correctly (as a single shared tensor).
         model.apply(init_weights)
 
     n_params = count_params(model)
@@ -138,17 +191,21 @@ def run_experiment(name, config, loaders, tokenizer, device,
         ppl_dev, _ = eval_loop(dev_loader, criterion_eval, model, device)
         pbar.set_description(f"{name} | Dev PPL: {ppl_dev:.2f}")
 
-        if ppl_dev < best_ppl:          # piu' bassa = migliore
+        if ppl_dev < best_ppl:          # lower PPL = better
             best_ppl = ppl_dev
             best_epoch = epoch
+            # Snapshot the best model on CPU so GPU memory isn't held by
+            # multiple full copies of the model across epochs.
             best_model = copy.deepcopy(model).to('cpu')
             cur_patience = patience
         else:
             cur_patience -= 1
-        if cur_patience <= 0:           # early stopping
-            break
+        if cur_patience <= 0:           # early stopping: dev PPL hasn't
+            break                       # improved for `patience` epochs in a row
 
     best_model.to(device)
+    # Test PPL is computed only here, after model selection is already final
+    # (based on dev PPL above) - purely for reporting, never for selection.
     test_ppl, _ = eval_loop(test_loader, criterion_eval, best_model, device)
     print(f"[{name}] Best Dev PPL: {best_ppl:.2f} | Test PPL: {test_ppl:.2f} "
           f"| params: {n_params:,} | epoche: {epochs_run} (best @ {best_epoch})")
@@ -166,11 +223,12 @@ def run_experiment(name, config, loaders, tokenizer, device,
 
 
 # ----------------------------------------------------------------------------
-# Logging degli esperimenti (JSON) e generazione del report (Markdown)
+# Experiment logging (JSON) and Markdown report generation
 # ----------------------------------------------------------------------------
 
 def load_results(path):
-    """Carica la lista dei run gia' salvati (lista vuota se il file non esiste)."""
+    """Load the list of previously saved experiment runs (empty list if the
+    results file doesn't exist yet)."""
     if not os.path.exists(path):
         return []
     with open(path, "r") as f:
@@ -178,7 +236,8 @@ def load_results(path):
 
 
 def append_result(path, record):
-    """Aggiunge un record di esperimento al file JSON (creandolo se serve)."""
+    """Append one experiment record to the JSON results file, creating the
+    file (and its parent directory) if it doesn't exist yet."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     results = load_results(path)
     results.append(record)
@@ -188,7 +247,7 @@ def append_result(path, record):
 
 
 def make_record(group, label, info, swept_key=None, swept_value=None, seed=42):
-    """Costruisce il dizionario da salvare nel JSON a partire dall'info di run_experiment."""
+    """Build the JSON-serializable record for one run from run_experiment's info dict."""
     return {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "group": group,
@@ -208,7 +267,7 @@ def make_record(group, label, info, swept_key=None, swept_value=None, seed=42):
 
 
 def _jsonable(v):
-    """Converte valori non serializzabili (es. bool numpy) in tipi base."""
+    """Coerce a value into something json.dump can serialize (e.g. numpy bools)."""
     if isinstance(v, bool) or v is None:
         return v
     if isinstance(v, (int, float, str)):
@@ -216,13 +275,15 @@ def _jsonable(v):
     return str(v)
 
 
-# Ordine canonico dei gruppi nel report (segue gli step della consegna)
+# Canonical ordering of sweep groups in the generated report, mirroring the
+# steps of the incremental hyperparameter search required by the assignment.
 _GROUP_ORDER = [
     "baseline-lr", "d_model", "n_heads", "num_layers", "ff_dim",
     "dropout", "weight_tying", "single",
 ]
 
-# Descrizione di ogni gruppo, mostrata come intestazione nel report
+# Human-readable description of each group, shown as a section header in the
+# generated Markdown report.
 _GROUP_DESC = {
     "baseline-lr": "Step 0 - Baseline: ricerca del learning rate (modello fisso).",
     "d_model":     "Step 1 - Iperparametri: dimensione del modello (d_model).",
@@ -236,11 +297,13 @@ _GROUP_DESC = {
 
 
 def regenerate_observations_md(results_path, md_path):
-    """Rigenera da zero il report Markdown a partire dal file JSON dei risultati.
+    """Regenerate the Markdown observations report from scratch from the JSON results log.
 
-    Per ogni gruppo produce una tabella ordinata, marca il run migliore con una
-    stella e aggiunge un'osservazione automatica. In fondo riassume la migliore
-    configurazione globale. Pensato per essere copiato/adattato nel report.
+    For each sweep group, produces a sorted table, marks the best run (chosen
+    by dev PPL, see below) with a star, and appends an auto-generated
+    observation sentence. At the end, summarizes the single best configuration
+    found so far across all groups. Intended to be copy/pasted (or adapted)
+    directly into the written report, rather than maintained by hand.
     """
     results = load_results(results_path)
     os.makedirs(os.path.dirname(md_path), exist_ok=True)
@@ -262,8 +325,8 @@ def regenerate_observations_md(results_path, md_path):
             f.write("\n".join(lines) + "\n")
         return
 
-    # Migliore globale: la selezione si fa SEMPRE sul dev set (mai sul test).
-    # Il test PPL viene solo riportato come numero finale della config scelta.
+    # Global best: selection is ALWAYS done on the dev set (never on test).
+    # Test PPL is only reported as the final number for the chosen config.
     best = min(results, key=lambda r: r["best_dev_ppl"])
     lines.append("## Migliore configurazione finora")
     lines.append("")
@@ -275,7 +338,7 @@ def regenerate_observations_md(results_path, md_path):
     lines.append(f"- config: `{best['config']}`")
     lines.append("")
 
-    # Raggruppa per gruppo, mantenendo l'ordine canonico
+    # Group records by sweep group, preserving the canonical order defined above.
     groups = {}
     for r in results:
         groups.setdefault(r["group"], []).append(r)
@@ -291,7 +354,7 @@ def regenerate_observations_md(results_path, md_path):
         lines.append("")
         lines.append("| valore | lr | params | epoche | best dev PPL | test PPL | <250 | |")
         lines.append("|---|---|---|---|---|---|---|---|")
-        best_run = min(runs, key=lambda r: r["best_dev_ppl"])  # scelta sul dev, non sul test
+        best_run = min(runs, key=lambda r: r["best_dev_ppl"])  # selected by dev PPL, not test
         for r in runs:
             star = "⭐" if r is best_run else ""
             val = r["swept_value"] if r["swept_value"] is not None else "-"
@@ -301,7 +364,7 @@ def regenerate_observations_md(results_path, md_path):
                 f"| {r['best_dev_ppl']:.2f} | {r['test_ppl']:.2f} | {ok} | {star} |"
             )
         lines.append("")
-        # Osservazione automatica
+        # Auto-generated observation sentence summarizing this group's spread.
         if len(runs) > 1 and best_run["swept_value"] is not None:
             worst_run = max(runs, key=lambda r: r["best_dev_ppl"])
             delta = worst_run["best_dev_ppl"] - best_run["best_dev_ppl"]

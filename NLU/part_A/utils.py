@@ -1,13 +1,23 @@
 # utils.py
-# Part 2.A - Caricamento dati per la NLU from scratch su ATIS.
+# Part 2.A - Data loading and preprocessing for the from-scratch NLU model on ATIS.
 #
-# Vocabolario word-level costruito sul training set (niente BPE: ogni parola ha
-# esattamente una etichetta slot). Token speciali: pad=0, unk=1, cls=2. Un token
-# CLS viene appeso in CODA a ogni frase (modello causale -> solo l'ultima
-# posizione vede tutta la frase); il suo target slot condivide l'id 0 col pad,
-# quindi e' ignorato dalla loss. Il dev set e' uno split stratificato 10% del train.
+# Word-level vocabulary built from the training set only (no BPE/subword
+# tokenization: each whitespace-separated word maps to exactly one slot
+# label, matching ATIS's pre-tokenized BIO annotation). Special tokens:
+# pad=0, unk=1, cls=2.
 #
-# Esempio ATIS:
+# A CLS token is appended at the END of every utterance (not at the
+# beginning, unlike BERT-style encoders). This is required because the
+# downstream model (model.py) is autoregressive/causal: a token can only
+# attend to earlier positions, so only the LAST position in the sequence has
+# attended to the entire utterance. Placing CLS at the end makes its hidden
+# state the correct pooled representation for intent classification. Its
+# slot target shares id 0 with PAD (see Lang._build_label_vocab below), so it
+# is automatically excluded from the slot loss via ignore_index=PAD_TOKEN.
+#
+# The dev set is a stratified 10% split of the original training set.
+#
+# ATIS example record:
 #   {"utterance": "...", "slots": "O B-... ...", "intent": "flight"}
 
 import json
@@ -18,18 +28,26 @@ import torch
 import torch.utils.data as data
 from torch.utils.data import DataLoader
 
-PAD_TOKEN = 0  # id del padding
+PAD_TOKEN = 0  # padding id, shared with the CLS slot-label id (see Lang)
 
 
 def load_data(path):
-    """Carica ATIS da JSON (lista di dict con 'utterance', 'slots', 'intent')."""
+    """Load an ATIS split from a JSON file (a list of dicts, each with
+    'utterance', 'slots', and 'intent' string fields)."""
     with open(path) as f:
         return json.loads(f.read())
 
 
 def create_dev_split(train_raw, dev_size=0.10, random_state=42):
-    """Dev set stratificato sull'intent (ATIS e' sbilanciato: 'flight' ~70%).
-    Gli intent presenti una sola volta restano nel training (non splittabili)."""
+    """Carve out a stratified-by-intent dev split from the training set.
+
+    ATIS's intent distribution is heavily skewed (the 'flight' intent alone
+    covers roughly 70% of examples), so stratified sampling is used to keep
+    the dev set's intent proportions representative of the training set.
+    Intents that occur only once cannot be stratified (sklearn requires at
+    least 2 members per class to split) and are therefore always kept in the
+    training portion rather than risking an error or being dropped.
+    """
     intents = [x["intent"] for x in train_raw]
     count_y = Counter(intents)
 
@@ -50,11 +68,16 @@ def create_dev_split(train_raw, dev_size=0.10, random_state=42):
 
 
 class Lang:
-    """Vocabolari word2id / slot2id / intent2id (con gli inversi id2*).
+    """Holds the word2id / slot2id / intent2id vocabularies (and their id2*
+    inverses) used to convert raw ATIS strings to integer ids.
 
-    Token speciali: 'pad'(0), 'unk'(1), 'cls'(2). In slot2id il 'cls' riceve id=0
-    (come pad): cosi' la sua predizione slot e' ignorata dalla loss
-    (ignore_index=PAD_TOKEN). id2slot esclude 'cls' per evitare ambiguita'.
+    Special tokens: 'pad' (0), 'unk' (1), 'cls' (2) in word2id. In slot2id,
+    'cls' is deliberately mapped to id 0, the SAME id as 'pad': this means
+    the slot-loss's ignore_index=PAD_TOKEN (see functions.py) automatically
+    ignores the CLS position's slot prediction at training/eval time, without
+    needing a separate special-case. id2slot excludes the 'cls' key (since it
+    aliases id 0 with 'pad', keeping both would be ambiguous when decoding
+    ids back to slot label strings).
     """
 
     def __init__(self, words, intents, slots, cutoff=0):
@@ -67,6 +90,8 @@ class Lang:
         self.id2intent = {v: k for k, v in self.intent2id.items()}
 
     def _build_word_vocab(self, words, cutoff=0):
+        """Build word2id from a flat list of training-set words, keeping only
+        words with frequency > cutoff (cutoff=0 keeps everything)."""
         vocab = {"pad": PAD_TOKEN, "unk": 1, "cls": 2}
         for word, freq in Counter(words).items():
             if freq > cutoff and word not in vocab:
@@ -74,20 +99,30 @@ class Lang:
         return vocab
 
     def _build_label_vocab(self, labels, pad=True, cls=True):
+        """Build a label vocabulary (used for both slot2id and intent2id).
+        Labels are sorted before assigning ids purely for reproducibility
+        (so the same corpus always yields the same id assignment)."""
         vocab = {}
         if pad:
             vocab["pad"] = PAD_TOKEN  # 0
-        for label in sorted(labels):  # sorted -> riproducibilita'
+        for label in sorted(labels):  # sorted -> reproducible id assignment
             if label not in vocab:
                 vocab[label] = len(vocab)
         if cls:
-            vocab["cls"] = PAD_TOKEN   # CLS condivide l'id del pad -> ignorato dalla loss
+            vocab["cls"] = PAD_TOKEN   # CLS aliases the pad id -> ignored by the slot loss
         return vocab
 
 
 def build_lang(train_raw, dev_raw, test_raw, cutoff=0):
-    """Parole SOLO dal train (le altre -> 'unk' a test time); etichette slot/intent
-    da train+dev+test (cosi' nessuna etichetta e' sconosciuta a test time)."""
+    """Build the Lang vocabularies.
+
+    Word vocabulary is built ONLY from the training set (any word seen only
+    at dev/test time falls back to 'unk'), matching standard practice and
+    preventing test-set leakage into the vocabulary. Slot and intent label
+    vocabularies, by contrast, are built from train+dev+test combined, so
+    that no label encountered at evaluation time is ever truly "unseen" by
+    the model's output space (labels are a small closed set, unlike words).
+    """
     words = sum([x["utterance"].split() for x in train_raw], [])
     corpus = train_raw + dev_raw + test_raw
     slots = set(sum([x["slots"].split() for x in corpus], []))
@@ -96,10 +131,13 @@ def build_lang(train_raw, dev_raw, test_raw, cutoff=0):
 
 
 class IntentsAndSlots(data.Dataset):
-    """Dataset ATIS: converte le stringhe in id e appende il CLS in coda.
+    """PyTorch Dataset wrapping ATIS examples, converting word/slot/intent
+    strings to integer ids and appending the CLS token id at the end of each
+    utterance and slot sequence.
 
-    Per esempio: utterance = [w1..wN, cls_id], slots = [s1..sN, pad_id]
-    (il CLS riceve pad_id -> ignorato dalla loss slot), intent = int.
+    For one example: utterance ids = [w1..wN, cls_id], slot ids = [s1..sN,
+    pad_id] (the CLS position is assigned pad_id, so it is ignored by the
+    slot loss), intent id = a single int.
     """
 
     def __init__(self, dataset, lang, unk="unk", cls="cls", add_cls=True):
@@ -123,9 +161,16 @@ class IntentsAndSlots(data.Dataset):
         }
 
     def _mapping_lab(self, data, mapper):
+        """Map a list of (intent) label strings to ids, defaulting to 'unk'
+        for any unseen label."""
         return [mapper[x] if x in mapper else mapper[self.unk] for x in data]
 
     def _mapping_seq(self, data, mapper):
+        """Map a list of whitespace-tokenized sequences (utterances or BIO
+        slot strings) to lists of ids, appending the CLS id at the end of
+        each sequence when add_cls=True. The CLS append happens here, at the
+        per-sequence level, so every example handed to the model already has
+        CLS in the final position before any batching/padding occurs."""
         result = []
         for seq in data:
             tmp = [mapper[t] if t in mapper else mapper[self.unk] for t in seq.split()]
@@ -136,10 +181,18 @@ class IntentsAndSlots(data.Dataset):
 
 
 def collate_fn(batch):
-    """Padding a destra con PAD_TOKEN. 'slots_len' = lunghezza reale (incluso CLS),
-    usata nel forward per estrarre il vettore CLS.
+    """Collate a list of dataset examples into a padded batch.
 
-    Returns dict: 'utterances'(B,L), 'y_slots'(B,L), 'intents'(B,), 'slots_len'(B,)."""
+    Right-pads variable-length sequences with PAD_TOKEN up to the batch's max
+    length. 'slots_len' records each example's true (unpadded) length,
+    INCLUDING the appended CLS token; this is exactly the value the model's
+    forward() needs to index out each example's own CLS hidden state at
+    position slots_len[i]-1 (see model.py), since the batch's padded length
+    may exceed any individual example's real length.
+
+    Returns dict: 'utterances' (B, L), 'y_slots' (B, L), 'intents' (B,),
+    'slots_len' (B,).
+    """
     def merge(sequences):
         lengths = [len(seq) for seq in sequences]
         max_len = max(lengths) if max(lengths) > 0 else 1
@@ -163,7 +216,9 @@ def collate_fn(batch):
 
 def get_dataloaders(train_dataset, dev_dataset, test_dataset,
                     batch_size_train=128, batch_size_eval=64, device="cpu"):
-    """Crea i DataLoader (la collate sposta i tensori su `device`)."""
+    """Build train/dev/test DataLoaders. The collate function used here wraps
+    collate_fn and additionally moves every resulting tensor to `device`, so
+    batches arrive on the target device (CPU/CUDA/MPS) ready for the model."""
     def collate_to_device(batch):
         return {k: v.to(device) for k, v in collate_fn(batch).items()}
 

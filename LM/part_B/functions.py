@@ -1,11 +1,17 @@
 # functions.py
-# Part 1.B - Freeze del backbone + abilitazione LoRA, loop di training/eval,
-# early stopping e logging degli esperimenti in JSON (come la Part 1.A).
+# Part 1.B - Backbone freezing + LoRA adapter enabling, training/eval loops, early
+# stopping, and JSON experiment logging (mirrors the structure of Part 1.A).
 #
-# A differenza della Part 1.A, la loss e' calcolata dentro GPT2LMHeadModel:
-# passando `labels` al forward, il modello restituisce output.loss (fa lo shift
-# internamente). Il padding e' gestito mettendo le posizioni di pad a -100
-# (HuggingFace ignora -100). Solo le matrici LoRA sono addestrabili.
+# Key difference from Part 1.A: there, the loss was computed manually outside the
+# model after manually shifting logits/labels by one position. Here, the loss is
+# computed INSIDE GPT2LMHeadModel: passing `labels` to the model's forward call makes
+# it return `output.loss`, with the input/label shift performed internally by
+# HuggingFace. Padding positions are masked out of that internal loss by setting them
+# to -100 before calling the model (PyTorch's cross-entropy convention: -100 is
+# ignored). Manually shifting labels in this file, as Part 1.A does, would therefore be
+# redundant -- and in fact wrong, since the model would then shift an already-shifted
+# tensor. Only the LoRA adapter matrices are trainable; the rest of GPT-2 is frozen via
+# freeze_pretrained_and_enable_lora below.
 
 import os
 import json
@@ -18,17 +24,25 @@ from tqdm import tqdm
 
 from model import CustomGPT2Attention
 
-# La consegna chiede PPL test < 250 (e migliore della Part 1.A).
+# Assignment requirement: test PPL must be below 250 (and lower than Part 1.A's
+# from-scratch baseline).
 PPL_THRESHOLD = 250
 
 
 # ----------------------------------------------------------------------------
-# 1. Freeze del backbone / abilitazione dei soli adapter LoRA
+# 1. Freeze the pre-trained backbone / enable only the LoRA adapters
 # ----------------------------------------------------------------------------
 
 def freeze_pretrained_and_enable_lora(model):
-    """Congela tutti i parametri e riabilita solo le matrici LoRA di ogni
-    CustomGPT2Attention (il backbone da ~124M resta congelato)."""
+    """Freeze every parameter in `model`, then re-enable gradients only for the LoRA
+    matrices inside each CustomGPT2Attention module.
+
+    This two-pass approach (freeze everything, then selectively unfreeze) is simpler
+    and less error-prone than trying to freeze only "the backbone" by name matching,
+    and it guarantees by construction that the ~124M pre-trained GPT-2 parameters never
+    receive gradients or get updated by the optimizer -- only the small LoRA adapter
+    matrices (lora_A_*/lora_B_* on Q, K, V) do.
+    """
     for param in model.parameters():
         param.requires_grad = False
 
@@ -43,11 +57,16 @@ def freeze_pretrained_and_enable_lora(model):
 
 
 # ----------------------------------------------------------------------------
-# 2. Loop di training (una epoca)
+# 2. Training loop (one epoch)
 # ----------------------------------------------------------------------------
 
 def train_loop(data, optimizer, model, tokenizer, clip=5.0):
-    """Una epoca di training. Restituisce la cross-entropy media per token (pesata)."""
+    """Run one training epoch over `data`.
+
+    Returns the token-weighted average cross-entropy loss over the whole epoch (i.e.
+    sum of per-batch total loss divided by total token count, not a plain average of
+    per-batch means -- this is correct under variable batch lengths/sizes).
+    """
     model.train()
     loss_array = []
     number_of_tokens = []
@@ -56,19 +75,28 @@ def train_loop(data, optimizer, model, tokenizer, clip=5.0):
     for input_ids, _labels, n_tokens in pbar:
         optimizer.zero_grad()
 
-        # labels = copia di input_ids; pad -> -100 (ignorato da HuggingFace nella loss).
-        # Lo shift dei label lo fa il modello internamente.
+        # Build labels = input_ids with padding positions set to -100. We do NOT shift
+        # these labels by one position ourselves: GPT2LMHeadModel.forward() performs
+        # the input/label shift internally when `labels` is passed, and ignores any
+        # position whose label equals -100 when computing the cross-entropy loss. The
+        # `_labels` tensor returned by collate_fn (which IS pre-shifted) is therefore
+        # deliberately discarded here in favor of this internally-shifted approach.
         labels = input_ids.clone().detach()
         labels[labels == tokenizer.pad_token_id] = -100
 
-        output = model(input_ids, labels=labels)  # logits + loss interni
+        output = model(input_ids, labels=labels)  # logits + internally-computed loss
 
-        # output.loss e' la media per token: *n_tokens per la loss totale del batch
+        # output.loss is the mean loss per (non-ignored) token; multiplying back by
+        # n_tokens recovers the batch's total loss so it can be aggregated correctly
+        # across batches of different sizes below.
         loss_array.append(output.loss.item() * n_tokens)
         number_of_tokens.append(n_tokens)
 
         output.loss.backward()
-        # gradient clipping: i gradienti fluiscono dal backbone congelato alle matrici LoRA
+        # Gradient clipping over all parameters: gradients only flow into the LoRA
+        # matrices (the frozen backbone parameters have requires_grad=False and
+        # therefore no .grad to clip), but clip_grad_norm_ is called on the full
+        # parameter set for simplicity since it's a no-op on frozen tensors anyway.
         torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
         optimizer.step()
 
@@ -76,17 +104,22 @@ def train_loop(data, optimizer, model, tokenizer, clip=5.0):
 
 
 # ----------------------------------------------------------------------------
-# 3. Loop di valutazione
+# 3. Evaluation loop
 # ----------------------------------------------------------------------------
 
 def eval_loop(data, model, tokenizer):
-    """Valuta su dev/test senza aggiornare i pesi. Restituisce (ppl, loss_per_token)."""
+    """Evaluate `model` on `data` (dev or test) without updating any weights.
+
+    Returns (perplexity, average_loss_per_token).
+    """
     model.eval()
     loss_array = []
     number_of_tokens = []
 
     with torch.no_grad():
         for input_ids, _labels, n_tokens in tqdm(data, desc="  eval", leave=False):
+            # Same -100-masking / internal-shift pattern as train_loop (see comments
+            # there); kept consistent so train and eval loss are computed identically.
             labels = input_ids.clone().detach()
             labels[labels == tokenizer.pad_token_id] = -100
 
@@ -96,21 +129,24 @@ def eval_loop(data, model, tokenizer):
             number_of_tokens.append(n_tokens)
 
     loss_avg = sum(loss_array) / sum(number_of_tokens)
-    ppl = math.exp(min(loss_avg, 100))  # cap a e^100 per evitare overflow nelle prime epoche
+    ppl = math.exp(min(loss_avg, 100))  # cap at e^100 to avoid overflow during early epochs
     return ppl, loss_avg
 
 
 # ----------------------------------------------------------------------------
-# 4. Training completo con early stopping (sulla dev PPL)
+# 4. Full training run with early stopping (on dev PPL)
 # ----------------------------------------------------------------------------
 
 def train_model(model, train_loader, dev_loader, tokenizer, optimizer,
                 n_epochs=20, patience=3, experiment_name="exp"):
-    """Training con early stopping sulla dev PPL. Col modello pre-addestrato la
-    convergenza e' rapida (poche epoche).
+    """Train `model` for up to `n_epochs`, with early stopping based on dev PPL.
+
+    Because the backbone is already pre-trained and only a small LoRA adapter is being
+    fit, convergence is typically much faster than training from scratch (Part 1.A) --
+    often within a handful of epochs.
 
     Returns:
-        best_model (su CPU), best_dev_ppl, best_epoch, epochs_run
+        best_model (moved to CPU), best_dev_ppl, best_epoch, epochs_run
     """
     best_ppl = math.inf
     best_model = None
@@ -139,16 +175,17 @@ def train_model(model, train_loader, dev_loader, tokenizer, optimizer,
 
 
 def count_trainable(model):
-    """Numero di parametri addestrabili (le sole matrici LoRA dopo il freeze)."""
+    """Count trainable parameters (the LoRA matrices only, once frozen)."""
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
 # ----------------------------------------------------------------------------
-# 5. Logging degli esperimenti (JSON) e report Markdown - come la Part 1.A
+# 5. Experiment logging (JSON) and Markdown report generation - mirrors Part 1.A
 # ----------------------------------------------------------------------------
 
 def load_results(path):
-    """Carica la lista dei run gia' salvati (lista vuota se il file non esiste)."""
+    """Load the list of previously saved experiment records (empty list if the results
+    file doesn't exist yet)."""
     if not os.path.exists(path):
         return []
     with open(path, "r") as f:
@@ -156,12 +193,18 @@ def load_results(path):
 
 
 def done_experiments(path):
-    """Insieme dei nomi di esperimento gia' presenti nel JSON (per l'idempotenza)."""
+    """Return the set of experiment names already present in the results JSON.
+
+    Used by main.py to make the greedy search idempotent: any experiment whose name is
+    already in this set is skipped rather than re-run, so interrupting and restarting
+    the script (e.g. after a VM reboot) resumes safely instead of duplicating runs.
+    """
     return {r["experiment"] for r in load_results(path)}
 
 
 def append_result(path, record):
-    """Aggiunge un record di esperimento al file JSON (creandolo se serve)."""
+    """Append one experiment record to the JSON results file, creating the file (and
+    its parent directory) if it doesn't exist yet."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     results = load_results(path)
     results.append(record)
@@ -171,7 +214,8 @@ def append_result(path, record):
 
 
 def make_record(experiment, step, info, seed=42):
-    """Costruisce il dizionario da salvare nel JSON a partire dalle metriche di run."""
+    """Build the JSON-serializable dict describing one experiment run, from the raw
+    metrics gathered in main.run_one."""
     return {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "experiment": experiment,
@@ -200,10 +244,12 @@ _STEP_DESC = {
 
 
 def regenerate_observations_md(results_path, md_path, baseline_ppl=None):
-    """Rigenera il report Markdown a partire dal JSON dei risultati.
+    """Regenerate the human-readable Markdown report from the JSON results file.
 
-    La selezione del migliore (per step e globale) si fa SEMPRE sulla dev PPL;
-    il test PPL e' solo riportato come numero finale.
+    The "best" configuration (both per-step and overall) is ALWAYS selected by
+    minimum dev PPL, never by test PPL -- test PPL is only reported alongside the
+    winning configuration as the final number, to avoid implicitly tuning
+    hyperparameters against the test set.
     """
     results = load_results(results_path)
     os.makedirs(os.path.dirname(md_path) or ".", exist_ok=True)

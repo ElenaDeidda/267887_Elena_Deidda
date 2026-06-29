@@ -1,12 +1,21 @@
 # functions.py
-# Part 2.A - Training e valutazione per il joint intent classification + slot filling,
-# piu' il logging degli esperimenti in JSON (come la Part 1.A).
+# Part 2.A - Training and evaluation loops for the joint intent classification
+# + slot filling model, plus JSON experiment logging (mirrors Part 1.A).
 #
-# Loss congiunta = CE(intent) + CE(slot), con la loss sugli slot che usa
-# ignore_index=PAD_TOKEN (ignora sia il padding sia la posizione del CLS). Gli
-# slot sono valutati con la F1 a livello di chunk (conll), gli intent con
-# l'accuracy. Ogni configurazione viene ripetuta su piu' run (media +- std) e
-# l'early stopping segue la slot F1 di dev.
+# Joint loss = CE(intent) + CE(slot), with the slot cross-entropy using
+# ignore_index=PAD_TOKEN so that BOTH padding positions AND the CLS position
+# (which is assigned the same id as PAD in slot2id, see utils.py) contribute
+# zero gradient/loss for slot filling -- only genuine word positions are
+# scored. Slots are evaluated with chunk-level (span-level) F1 via conll.py,
+# rather than naive per-token accuracy, because a multi-word slot (e.g. a
+# city name spanning several BIO-tagged tokens) is only counted as correct if
+# the WHOLE span matches; this is the standard CoNLL-2000 chunking evaluation
+# convention. Intents are evaluated with plain accuracy. Each configuration
+# is repeated over multiple runs (mean +- std) to average out the
+# variance from random initialization/seed effects, and early stopping
+# tracks dev slot F1 with a deliberately low patience (3 epochs without
+# improvement), since this is a small model on a small dataset that
+# converges quickly -- a long patience would just waste epochs.
 
 import os
 import json
@@ -29,21 +38,27 @@ PAD_TOKEN = 0
 
 
 # ----------------------------------------------------------------------------
-# 1. Loop di training (una epoca)
+# 1. Training loop (one epoch)
 # ----------------------------------------------------------------------------
 
 def train_loop(data, optimizer, criterion_slots, criterion_intents, model):
-    """Una epoca di training. Restituisce la lista delle loss per batch."""
+    """Run one training epoch over `data` and return the list of per-batch
+    joint loss values (used only for logging/inspection, not for early
+    stopping, which is based on dev slot F1 instead -- see train_model)."""
     model.train()
     loss_array = []
     for batch in tqdm(data, desc="  train", leave=False):
         optimizer.zero_grad()
         slots, intent = model(batch["utterances"], batch["slots_len"])
-        slots = slots.permute(0, 2, 1)  # CrossEntropyLoss vuole (B, C, L)
+        # model() returns slot logits as (B, L, n_slots), but
+        # nn.CrossEntropyLoss for a per-token multi-class target expects the
+        # class dimension in position 1, i.e. (B, C, L). permute(0, 2, 1)
+        # reorders the axes accordingly without changing any values.
+        slots = slots.permute(0, 2, 1)  # (B, L, n_slots) -> (B, n_slots, L)
 
         loss_intent = criterion_intents(intent, batch["intents"])
         loss_slot = criterion_slots(slots, batch["y_slots"])
-        loss = loss_intent + loss_slot  # joint loss a pesi uguali
+        loss = loss_intent + loss_slot  # joint loss, intent and slot terms weighted equally
         loss_array.append(loss.item())
 
         loss.backward()
@@ -52,19 +67,24 @@ def train_loop(data, optimizer, criterion_slots, criterion_intents, model):
 
 
 # ----------------------------------------------------------------------------
-# 2. Loop di valutazione (dev o test)
+# 2. Evaluation loop (dev or test)
 # ----------------------------------------------------------------------------
 
 def eval_loop(data, criterion_slots, criterion_intents, model, lang):
-    """Valuta senza aggiornare i pesi: decodifica intent e slot e calcola le metriche.
+    """Evaluate the model without updating weights: decode predicted intents
+    and slot sequences back to strings and compute metrics.
 
-    La decodifica slot usa length = slots_len[i] - 1 per escludere il CLS, perche'
-    conll.evaluate() si aspetta sequenze senza il token CLS.
+    Slot decoding uses length = slots_len[i] - 1 to EXCLUDE the trailing CLS
+    position, because conll.evaluate() expects plain word/label sequences
+    (it has no notion of a CLS token, and including it would corrupt the
+    chunk boundaries it computes).
 
     Returns:
-        results (dict conll, results['total']['f'] = slot F1),
-        report_intent (dict, report_intent['accuracy']),
-        loss_array
+        results: dict returned by conll.evaluate(); results['total']['f'] is
+            the chunk-level (span-level) slot F1.
+        report_intent: dict from sklearn's classification_report;
+            report_intent['accuracy'] is the intent accuracy.
+        loss_array: list of per-batch joint loss values (logging only).
     """
     model.eval()
     loss_array = []
@@ -74,22 +94,25 @@ def eval_loop(data, criterion_slots, criterion_intents, model, lang):
     with torch.no_grad():
         for batch in tqdm(data, desc="  eval", leave=False):
             slots, intent = model(batch["utterances"], batch["slots_len"])
+            # Same axis reorder as in train_loop: CrossEntropyLoss needs the
+            # class dimension at index 1, i.e. (B, slots_size, L).
             slots = slots.permute(0, 2, 1)  # (B, slots_size, L)
 
             loss_intent = criterion_intents(intent, batch["intents"])
             loss_slot = criterion_slots(slots, batch["y_slots"])
             loss_array.append((loss_intent + loss_slot).item())
 
-            # intent: argmax -> stringhe
+            # Intent: take the argmax class per example and map back to strings.
             out_intents = [lang.id2intent[x] for x in torch.argmax(intent, dim=1).tolist()]
             gt_intents = [lang.id2intent[x] for x in batch["intents"].tolist()]
             ref_intents.extend(gt_intents)
             hyp_intents.extend(out_intents)
 
-            # slot: argmax per token, poi sequenze (parola, etichetta) senza CLS
+            # Slots: take the argmax label per token, then build (word, label)
+            # sequences for conll, truncated to exclude the CLS token/position.
             output_slots = torch.argmax(slots, dim=1)
             for id_seq, seq in enumerate(output_slots):
-                length = batch["slots_len"].tolist()[id_seq] - 1  # -1: esclude il CLS
+                length = batch["slots_len"].tolist()[id_seq] - 1  # -1: drop the trailing CLS position
                 utt_ids = batch["utterances"][id_seq][:length].tolist()
                 utterance = [lang.id2word[e] for e in utt_ids]
                 gt_ids = batch["y_slots"][id_seq][:length].tolist()
@@ -102,7 +125,10 @@ def eval_loop(data, criterion_slots, criterion_intents, model, lang):
     try:
         results = evaluate(ref_slots, hyp_slots)
     except Exception as ex:
-        # puo' capitare con uno slot predetto mai visto nel ground truth (lr alto, prime epoche)
+        # Can happen if the model predicts a slot label never seen in this
+        # batch's ground truth (e.g. early epochs with a high learning rate);
+        # conll's internal bookkeeping can raise on certain label patterns,
+        # so we degrade gracefully to F1=0 rather than crashing the whole run.
         print(f"  Attenzione conll.evaluate: {ex}")
         results = {"total": {"f": 0}}
 
@@ -113,14 +139,27 @@ def eval_loop(data, criterion_slots, criterion_intents, model, lang):
 
 
 # ----------------------------------------------------------------------------
-# 3. Training completo con early stopping (sulla slot F1 di dev)
+# 3. Full training with early stopping (on dev slot F1)
 # ----------------------------------------------------------------------------
 
 def train_model(model, train_loader, dev_loader, lang, optimizer,
                 criterion_slots, criterion_intents,
                 n_epochs=200, patience=3, experiment_name="exp"):
-    """Early stopping sulla slot F1 di dev (metrica piu' diretta della loss su un
-    corpus piccolo come ATIS). Restituisce (best_model su CPU, best_dev_f1, best_dev_acc)."""
+    """Train for up to n_epochs with early stopping on dev slot F1.
+
+    Dev slot F1 is used as the early-stopping criterion (rather than dev
+    loss) because it is the more direct/interpretable measure of what we
+    actually care about on a small corpus like ATIS. `patience` is
+    deliberately small (default 3): this is a small model on a small
+    dataset that converges fast, so a long patience would mostly just train
+    extra epochs without improving the selected checkpoint.
+
+    Returns:
+        best_model: deep copy of the model (moved to CPU) from the epoch
+            with the highest dev slot F1 seen so far.
+        best_f1: that epoch's dev slot F1.
+        best_acc: that epoch's dev intent accuracy.
+    """
     best_f1 = 0.0
     best_acc = 0.0
     best_model = None
@@ -146,13 +185,13 @@ def train_model(model, train_loader, dev_loader, lang, optimizer,
             if cur_patience <= 0:
                 break
 
-    if best_model is None:  # nessun miglioramento (raro): tieni l'ultimo
+    if best_model is None:  # no improvement at all over n_epochs (rare): keep the last epoch's model
         best_model = copy.deepcopy(model).cpu()
     return best_model, best_f1, best_acc
 
 
 # ----------------------------------------------------------------------------
-# 4. Esperimento con piu' run (media +- std)
+# 4. Multi-run experiment (mean +- std)
 # ----------------------------------------------------------------------------
 
 def run_experiments(train_loader, dev_loader, test_loader, lang,
@@ -160,10 +199,24 @@ def run_experiments(train_loader, dev_loader, test_loader, lang,
                     lr, d_model, n_heads, num_layers, ff_dim, dropout,
                     n_runs=5, n_epochs=200, patience=3,
                     experiment_name="exp", seed=42, device="cpu"):
-    """n_runs training indipendenti (nuovo modello random ogni volta); riporta
-    media +- std di slot F1 e intent accuracy sul TEST e la media della dev F1
-    (usata per la selezione greedy). ATIS e' piccolo -> piu' run danno una stima
-    affidabile."""
+    """Run n_runs independent trainings of one hyperparameter configuration
+    (a freshly re-initialized model each time, seeded as seed+run_idx) and
+    aggregate the results.
+
+    Running multiple seeds matters specifically because ATIS is small: a
+    single run's test/dev score can vary noticeably just due to random
+    initialization and minibatch ordering, so averaging over n_runs (default
+    5) gives a much more reliable estimate of whether a candidate
+    hyperparameter value is actually better, rather than picking a value
+    that merely got a lucky seed (this is also why main.py's greedy search
+    always compares the MEAN dev F1 across n_runs, not a single run's score,
+    before deciding whether to keep a candidate).
+
+    Returns a dict with the config, parameter count, and mean+-std of dev F1,
+    dev intent accuracy, test slot F1, and test intent accuracy (the dev F1
+    mean is what main.py's run_search uses to pick the winner of each step;
+    the test metrics are what gets reported in the final results/paper).
+    """
     criterion_slots = nn.CrossEntropyLoss(ignore_index=PAD_TOKEN)
     criterion_intents = nn.CrossEntropyLoss()
 
@@ -177,7 +230,7 @@ def run_experiments(train_loader, dev_loader, test_loader, lang,
 
     for run_idx in range(n_runs):
         print(f"\n--- Run {run_idx + 1}/{n_runs} ---")
-        torch.manual_seed(seed + run_idx)  # run diverse ma riproducibili
+        torch.manual_seed(seed + run_idx)  # different but reproducible seed per run
 
         model = GPT2(
             vocab_size=vocab_len, slots_size=slots_len, n_intents=n_intents,
@@ -232,10 +285,17 @@ def run_experiments(train_loader, dev_loader, test_loader, lang,
 
 
 # ----------------------------------------------------------------------------
-# 5. Logging degli esperimenti (JSON) e report Markdown
+# 5. Experiment logging (JSON) and Markdown report generation
 # ----------------------------------------------------------------------------
+#
+# This JSON file (results/results.json) is what makes main.py's search
+# idempotent: each experiment is keyed by its unique name, and done_experiments
+# is used by main.py to skip any experiment that has already been recorded
+# (so an interrupted/resumed search does not redundantly retrain configs).
 
 def load_results(path):
+    """Load the list of experiment records from `path`, or an empty list if
+    the results file does not exist yet."""
     if not os.path.exists(path):
         return []
     with open(path, "r") as f:
@@ -243,10 +303,14 @@ def load_results(path):
 
 
 def done_experiments(path):
+    """Return the set of experiment names already present in the results
+    file, used by main.py to decide whether a candidate needs (re)training."""
     return {r["experiment"] for r in load_results(path)}
 
 
 def append_result(path, record):
+    """Append one experiment record to the JSON results file (read-modify-write;
+    creates the parent directory and file if they do not exist yet)."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     results = load_results(path)
     results.append(record)
@@ -256,12 +320,13 @@ def append_result(path, record):
 
 
 def make_record(experiment, param, info, seed=42):
-    """Costruisce il record JSON dell'esperimento (metriche dev per la selezione,
-    metriche test per il report)."""
+    """Build the JSON record for one experiment: dev metrics are what main.py
+    uses to select the winning candidate at each search step; test metrics
+    (mean +- std across runs) are what gets reported in the final results."""
     rec = {
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "experiment": experiment,
-        "param": param,  # iperparametro variato in questo step
+        "param": param,  # which hyperparameter was varied in this search step
         "seed": seed,
     }
     rec.update(info)
@@ -269,8 +334,10 @@ def make_record(experiment, param, info, seed=42):
 
 
 def regenerate_observations_md(results_path, md_path):
-    """Rigenera il report Markdown. La selezione del migliore (per gruppo e globale)
-    si fa sulla DEV slot F1; le metriche di test (media +- std) sono riportate."""
+    """Regenerate the human-readable Markdown report from the JSON results.
+    The "best" selection (both per-group and overall) is always made on DEV
+    slot F1; test metrics (mean +- std) are reported for reference but never
+    used to pick a winner, to avoid implicitly tuning on the test set."""
     results = load_results(results_path)
     os.makedirs(os.path.dirname(md_path) or ".", exist_ok=True)
 

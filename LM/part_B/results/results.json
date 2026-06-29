@@ -142,5 +142,23 @@
     "test_loss": 2.9523,
     "passes_threshold": true,
     "seed": 42
+  },
+  {
+    "timestamp": "2026-06-29T16:26:18",
+    "experiment": "step2_alpha_2x",
+    "step": 2,
+    "rank": 16,
+    "alpha": 32,
+    "scaling": 2.0,
+    "lr": 0.0005,
+    "batch_size": 8,
+    "n_trainable": 884736,
+    "best_epoch": 16,
+    "epochs_run": 19,
+    "best_dev_ppl": 21.1957,
+    "test_ppl": 19.3543,
+    "test_loss": 2.9629,
+    "passes_threshold": true,
+    "seed": 42
   }
 ]

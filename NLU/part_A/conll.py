@@ -1,6 +1,13 @@
 import re
 
 """
+conll.py - Standard CoNLL-2000 chunking evaluation (chunk/span-level
+precision, recall, and F1), used here to score slot filling (BIO-tagged
+spans) rather than naive per-token accuracy: a multi-token slot (e.g. a
+city name spanning several words) only counts as a correct chunk if every
+token in that span is tagged correctly, matching how Slot F1 is conventionally
+reported for ATIS-style sequence labeling.
+
 Modified version of https://pypi.org/project/conlleval/
 """
 

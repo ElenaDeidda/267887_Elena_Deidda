@@ -1,22 +1,33 @@
 # main.py
-# Part 2.A - NLU from scratch (Intent Classification + Slot Filling) su ATIS.
+# Part 2.A - NLU from scratch (Intent Classification + Slot Filling) on ATIS.
 #
-# Esegue la ricerca incrementale (greedy) degli iperparametri del GPT-2 from
-# scratch. Ogni configurazione e' ripetuta su piu' run (media +- std di Slot F1
-# conll e Intent Accuracy).
+# Entry point that runs the FULLY AUTOMATIC greedy hyperparameter search for
+# the from-scratch GPT-2 model, in a single command. Each candidate
+# configuration is repeated over multiple runs (mean +- std of conll chunk-
+# level Slot F1 and Intent Accuracy) before being compared to the running
+# best ("incumbent").
 #
-# RICERCA GREEDY (un iperparametro alla volta, vincitore scelto sulla DEV F1):
+# GREEDY SEARCH (one hyperparameter group at a time, winner picked on DEV F1):
 #   Step 0 - learning rate
-#   Step 1 - architettura: d_model, n_heads, num_layers, ff_dim
-#   Step 2 - dropout (incluso quello prima delle teste di output)
+#   Step 1 - architecture: d_model, n_heads, num_layers, ff_dim (each tested
+#            independently against the SAME incumbent score from step 0 -
+#            these are NOT chained to each other within step 1; see
+#            run_search below for exactly how the incumbent carries over)
+#   Step 2 - dropout (including the dropout applied right before the output
+#            heads)
 #
-# Il vincitore di ogni step e' propagato automaticamente allo step successivo.
-# I risultati vanno in results/results.json (idempotente) e observations.md.
+# A step's winning value becomes part of the config used by the NEXT step,
+# but a step can also end with NO change at all if none of its candidates'
+# mean dev F1 strictly exceeds the incumbent's (this is exactly what happened
+# for d_model, num_layers, ff_dim and dropout in the reported final run -
+# only n_heads improved on the baseline). Results are cached by experiment
+# name in results/results.json (idempotent: a finished experiment is never
+# retrained) and summarized in observations.md.
 #
-# Uso:
+# Usage:
 #   python main.py
 #   python main.py --runs 5 --epochs 200
-#   python main.py --notify <topic_ntfy> --shutdown   # comodo sulla VM
+#   python main.py --notify <topic_ntfy> --shutdown   # convenient on a cloud VM
 
 import os
 import argparse
@@ -37,7 +48,7 @@ from functions import (
 )
 
 # ----------------------------------------------------------------------------
-# Percorsi
+# Paths
 # ----------------------------------------------------------------------------
 DATA_DIR = os.path.join("dataset", "ATIS")
 TRAIN_PATH = os.path.join(DATA_DIR, "train.json")
@@ -49,13 +60,19 @@ OBSERVATIONS_MD = os.path.join(RESULTS_DIR, "observations.md")
 BIN_DIR = "bin"
 
 # ----------------------------------------------------------------------------
-# Config di partenza e ricerca greedy (un iperparametro alla volta)
+# Starting (baseline) config and greedy search plan (one hyperparameter group
+# at a time)
 # ----------------------------------------------------------------------------
 BASE = {"lr": 0.01, "d_model": 64, "n_heads": 2,
         "num_layers": 2, "ff_dim": 256, "dropout": 0.0}
 
-# (param variato, etichetta, lista di candidati). L'incumbent (valore corrente)
-# non e' rieseguito: il suo punteggio e' gia' noto e viene confrontato.
+# List of (param_name, file_label_prefix, [candidate_values]) tuples, one per
+# search step, processed in order by run_search. The incumbent value (i.e.
+# config[param] as it stands when the step starts) is NOT itself retrained
+# here -- its score is already known from a previous step (or, for the very
+# first step's parameter, is implicitly absent and handled via
+# `best_score is None` in run_search) and is simply used as the bar each new
+# candidate must strictly clear.
 SEARCH_STEPS = [
     ("lr",         "step0_lr",     [0.1, 0.01, 0.001, 0.0001]),
     ("d_model",    "step1_dmodel", [128, 256]),
@@ -67,6 +84,8 @@ SEARCH_STEPS = [
 
 
 def parse_args():
+    """Define and parse the command-line interface (see module docstring for
+    example invocations)."""
     p = argparse.ArgumentParser(description="NLU intent+slot from scratch (Part 2.A).")
     p.add_argument("--runs", type=int, default=5)
     p.add_argument("--epochs", type=int, default=200)
@@ -81,6 +100,8 @@ def parse_args():
 
 
 def set_seed(seed=42):
+    """Seed Python's random, torch CPU and (if available) all CUDA devices,
+    for reproducibility of the single final "save the best model" run."""
     random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -88,6 +109,7 @@ def set_seed(seed=42):
 
 
 def get_device():
+    """Pick the best available compute device: CUDA > Apple MPS > CPU."""
     if torch.cuda.is_available():
         return "cuda"
     if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
@@ -96,6 +118,9 @@ def get_device():
 
 
 def send_notification(target, best=None, error=None):
+    """POST a push notification (via ntfy.sh or a custom webhook URL) when the
+    search finishes or fails. Convenience for unattended runs on a remote VM;
+    failures to notify are caught and logged, never raised."""
     url = target if target.startswith("http") else f"https://ntfy.sh/{target}"
     if error is not None:
         title, message = "Run 2.A FALLITA", f"Errore: {type(error).__name__}: {error}"
@@ -116,6 +141,9 @@ def send_notification(target, best=None, error=None):
 
 
 def shutdown_machine():
+    """Attempt to power off the host machine (with or without sudo, depending
+    on what's available) once the search completes; used with --shutdown on
+    a disposable cloud VM to avoid paying for idle time."""
     print("\n[shutdown] spegnimento della macchina richiesto...")
     for cmd in (["sudo", "shutdown", "-h", "now"], ["shutdown", "-h", "now"],
                 ["sudo", "systemctl", "poweroff"], ["systemctl", "poweroff"]):
@@ -128,7 +156,8 @@ def shutdown_machine():
 
 
 def setup_data(device):
-    """Carica ATIS, crea il dev set, costruisce i vocabolari e i DataLoader."""
+    """Load ATIS train/test, carve out the dev split, build the Lang
+    vocabularies, and construct the train/dev/test DataLoaders."""
     tmp_train_raw = load_data(TRAIN_PATH)
     test_raw = load_data(TEST_PATH)
     print(f"Training set originale: {len(tmp_train_raw)} | Test set: {len(test_raw)}")
@@ -151,7 +180,10 @@ def setup_data(device):
 
 
 def train_and_save_best(cfg, loaders, lang, dims, device, path, args):
-    """Allena UNA istanza della config migliore e salva state_dict + vocabolari in bin/."""
+    """Train a SINGLE instance of the winning configuration (one seeded run,
+    not averaged like run_experiments) and persist its state_dict, config,
+    and vocabularies to `path` (under bin/), so the final model can be
+    reloaded later for inference without rerunning the whole search."""
     train_loader, dev_loader, _ = loaders
     vocab_len, slots_len, n_intents = dims
 
@@ -176,6 +208,12 @@ def train_and_save_best(cfg, loaders, lang, dims, device, path, args):
 
 
 def main():
+    """CLI entry point: run the full greedy search and, regardless of
+    success or failure, optionally send a notification and/or shut the
+    machine down (both intended for unattended runs on a cloud VM). Any
+    exception from run_search is re-raised after the finally-block
+    notify/shutdown housekeeping, so the process still exits with an error
+    status on failure."""
     args = parse_args()
     best_record = None
     err = None
@@ -193,6 +231,14 @@ def main():
 
 
 def run_search(args):
+    """Run the full greedy hyperparameter search described in the module
+    docstring (Step 0 lr, Step 1 architecture, Step 2 dropout) and, unless
+    --no_save was passed, train and persist one final instance of the
+    overall winning configuration.
+
+    Returns the JSON record (dict) of the best experiment found, selected by
+    DEV slot F1 (see make_record / run_experiments).
+    """
     device = get_device()
     print(f"Device: {device}")
     os.makedirs(BIN_DIR, exist_ok=True)
@@ -205,7 +251,12 @@ def run_search(args):
     records = {r["experiment"]: r for r in load_results(RESULTS_JSON)}
 
     def get_or_run(name, param, cfg):
-        """Record di `cfg`: dal JSON se gia' presente, altrimenti addestra (runs) e salva."""
+        """Return the experiment record for `cfg` under name `name`: loaded
+        from the JSON cache if `name` is already in `done` (idempotent skip,
+        so re-running main.py after an interruption does not retrain
+        anything already completed), otherwise trained from scratch via
+        run_experiments (args.runs seeds) and then appended to the JSON
+        cache / observations.md before being returned."""
         if name in done:
             print(f"[skip] {name} (gia' in {RESULTS_JSON})")
             return records[name]
@@ -224,19 +275,36 @@ def run_search(args):
         records[name] = rec
         return rec
 
-    # cascata greedy: a ogni step si tiene il vincitore sulla DEV F1
+    # Greedy cascade: at every step, the running-best ("incumbent") config is
+    # carried forward and only replaced if a candidate strictly beats it.
     config = dict(BASE)
-    best_score = None   # dev F1 dell'incumbent
+    best_score = None   # dev F1 of the current incumbent (None before step 0 has a result)
     best_record = None
 
     for param, label, candidates in SEARCH_STEPS:
         print(f"\n########## STEP '{param}' (incumbent = {config[param]}) ##########")
+        # IMPORTANT: step_value/step_score/step_rec are initialized from the
+        # CURRENT incumbent (config[param] and the best_score/best_record
+        # carried over from the previous step) BEFORE any candidate in this
+        # step is evaluated. This is what implements "test independently
+        # against the running-best incumbent, not chained": if NONE of this
+        # step's candidates achieve a dev F1 strictly greater than
+        # step_score, the loop below never updates step_value, so
+        # config[param] is reassigned to the same value it already had and
+        # the parameter is effectively left unchanged for all subsequent
+        # steps. This is exactly what happens for d_model, num_layers,
+        # ff_dim, and dropout in the reported run: their candidates all
+        # score below the incumbent dev F1 already achieved earlier (e.g.
+        # with d_model=64 from the lr step), so each of those parameters
+        # keeps its BASE value through the rest of the search.
         step_value, step_score, step_rec = config[param], best_score, best_record
         for v in candidates:
             name = f"{label}{v}"
             rec = get_or_run(name, param, {**config, param: v})
             score = rec["dev_f1_mean"]
             print(f"  {name}: dev F1 = {score:.4f} (test F1 {rec['slot_f1_mean']:.4f})")
+            # Strict ">" (not ">="): a candidate must genuinely beat the
+            # incumbent to be adopted, so ties keep the simpler/incumbent value.
             if step_score is None or score > step_score:
                 step_value, step_score, step_rec = v, score, rec
         config[param] = step_value

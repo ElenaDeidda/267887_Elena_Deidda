@@ -2,6 +2,14 @@ import re
 
 """
 Modified version of https://pypi.org/project/conlleval/
+
+This module implements the standard CoNLL chunking evaluation (precision,
+recall, and F1 computed at the chunk/segment level, e.g. IOB-style slot
+spans, rather than at the individual-token level) used by Part 2.B to score
+slot filling on ATIS. It is third-party boilerplate evaluation code, kept
+as-is; see functions.py's eval_loop for how its `evaluate()` entry point is
+called with (word, label) sequences reconstructed from the model's
+predictions.
 """
 
 

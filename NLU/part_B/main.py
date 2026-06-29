@@ -18,6 +18,41 @@
 #   python main.py
 #   python main.py --models bert gpt2 --runs 3 --epochs 30
 #   python main.py --notify <topic_ntfy> --shutdown   # comodo sulla VM
+#
+# ----------------------------------------------------------------------------------
+# English summary (module purpose and key rationale)
+# ----------------------------------------------------------------------------------
+# This is the entry point and experiment orchestrator for Part 2.B. For each
+# model family (bert: bert-base-uncased -> bert-large-uncased; gpt2:
+# openai-community/gpt2 -> gpt2-medium) it runs, in a single command, a fully
+# automatic 2-step GREEDY hyperparameter search on the BASE variant only:
+#   Step 0: try 3 learning-rate candidates, keep the best (by mean dev Slot F1
+#           across --runs seeds, to avoid seed-luck bias).
+#   Step 1: with that winning lr fixed, try 2 dropout candidates, keep the best.
+# The winning (lr, dropout) config from this base-model search is then reused,
+# WITHOUT being re-searched, to fine-tune the family's larger variant
+# (bert-large-uncased / gpt2-medium) exactly once. This base-search-then-
+# evaluate-large pattern is a deliberate, cost-driven design choice: an
+# exhaustive lr/dropout search repeated on the ~3x larger model would have
+# been far more expensive, while reusing the base model's winning config still
+# gives a meaningful, fair-ish comparison point to check whether scaling up
+# helps (empirically here, it does not: test metrics for bert-large/gpt2-medium
+# do not improve over bert-base/gpt2-base despite the parameter increase).
+#
+# The greedy search and the base->large hand-off are both implemented with the
+# same idempotent skip-if-done pattern used throughout this project: every
+# experiment is named deterministically, looked up in results/results.json
+# before running, and skipped (with the logged record reused) if already
+# present — so re-running `python main.py` after an interruption resumes
+# rather than redoing finished work. The incumbent config dict is mutated
+# in-place as each search step's winner is found (config[param] = step_value),
+# so later steps and the final large/medium run automatically see the
+# winning values of all earlier steps.
+#
+# bert-base/bert-large share one WordPiece vocabulary, and gpt2/gpt2-medium
+# share one BPE vocabulary, so the DataLoaders (and thus the tokenization /
+# label alignment performed in utils.py) built once for the base model are
+# reused unchanged for the large/medium model within the same family.
 
 import os
 import argparse
@@ -54,6 +89,10 @@ BIN_DIR         = "bin"
 # ----------------------------------------------------------------------------
 # Famiglie di modelli: base -> large/medium (stesso tokenizer per entrambi)
 # ----------------------------------------------------------------------------
+# Each family maps its "base" variant (subject to the full greedy search) to
+# its "large"/"medium" variant (fine-tuned once, reusing the base's winning
+# config — see module docstring above). "type" selects which dataset/model
+# classes and forward signature (model_type in model.py/functions.py) apply.
 MODEL_FAMILIES = {
     "bert": {
         "base":  "bert-base-uncased",
@@ -67,8 +106,14 @@ MODEL_FAMILIES = {
     },
 }
 
+# Default/incumbent hyperparameters the greedy search starts from, and which
+# remain in effect for any hyperparameter not yet touched by a search step.
 BASE = {"lr": 5e-5, "dropout": 0.1}
 
+# Ordered greedy search steps: (config key to update, label used in experiment
+# names, list of candidate values to try). Step order matters: dropout's
+# candidates are evaluated using the learning rate already chosen by the
+# previous step, not searched jointly/independently.
 SEARCH_STEPS = [
     ("lr",      "lr",      [1e-4, 5e-5, 2e-5]),
     ("dropout", "dropout", [0.1, 0.3]),
@@ -76,6 +121,11 @@ SEARCH_STEPS = [
 
 
 def parse_args():
+    """Parses CLI arguments controlling which model families to run, the
+    number of seeds per experiment (--runs), training budget (epochs,
+    early-stopping patience), batch sizes, and optional convenience flags for
+    unattended runs on a remote VM (--notify pings an ntfy.sh topic when done
+    or on failure; --shutdown powers off the machine afterwards)."""
     p = argparse.ArgumentParser(
         description="Fine-tuning BERT/GPT-2 (base+large) per intent+slot (Part 2.B).")
     p.add_argument("--models",   nargs="+", default=["bert", "gpt2"], choices=["bert", "gpt2"])
@@ -92,6 +142,8 @@ def parse_args():
 
 
 def set_seed(seed=42):
+    """Seeds Python's random module and PyTorch (CPU + all CUDA devices) for
+    reproducibility of the single "save best model" run in save_best()."""
     random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -99,6 +151,8 @@ def set_seed(seed=42):
 
 
 def get_device():
+    """Picks the best available compute device: CUDA, then Apple MPS, then
+    CPU as the final fallback."""
     if torch.cuda.is_available():
         return "cuda"
     if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
@@ -107,6 +161,9 @@ def get_device():
 
 
 def send_notification(target, best=None, error=None):
+    """Posts a push notification via ntfy.sh (or a custom URL) summarizing
+    either a fatal error or the best overall result, so a long unattended run
+    on a remote machine can be monitored without watching the terminal."""
     url = target if target.startswith("http") else f"https://ntfy.sh/{target}"
     if error is not None:
         title, message = "Run 2.B FALLITA", f"Errore: {type(error).__name__}: {error}"
@@ -127,6 +184,10 @@ def send_notification(target, best=None, error=None):
 
 
 def shutdown_machine():
+    """Attempts to power off the host machine via a few common shutdown
+    commands (with/without sudo), used after unattended runs on a cloud VM to
+    avoid leaving (and paying for) an idle instance. Silently gives up if none
+    of the commands succeed (e.g. no passwordless sudo)."""
     print("\n[shutdown] spegnimento della macchina richiesto...")
     for cmd in (["sudo", "shutdown", "-h", "now"], ["shutdown", "-h", "now"],
                 ["sudo", "systemctl", "poweroff"], ["systemctl", "poweroff"]):
@@ -140,7 +201,15 @@ def shutdown_machine():
 
 def build_loaders(model_type, lang, train_raw, dev_raw, test_raw, args):
     """Costruisce i DataLoader per il tipo di modello (bert o gpt2).
-    Il tokenizer base e' valido anche per large/medium (stesso vocabolario)."""
+    Il tokenizer base e' valido anche per large/medium (stesso vocabolario).
+
+    English: Builds the train/dev/test DataLoaders for the given model_type,
+    selecting the matching Dataset class, tokenizer, and collate_fn (see
+    utils.py). The tokenizer is always loaded from the BASE model id of the
+    family (MODEL_FAMILIES[...]["base"]) because base and large/medium share
+    the same vocabulary — these loaders are therefore reused unchanged when
+    later fine-tuning the large/medium variant of the same family.
+    """
     if model_type == "bert":
         tokenizer = get_bert_tokenizer(MODEL_FAMILIES["bert"]["base"])
         ds        = lambda raw: BERTIntentsAndSlots(raw, lang, tokenizer)
@@ -155,6 +224,10 @@ def build_loaders(model_type, lang, train_raw, dev_raw, test_raw, args):
 
 
 def main():
+    """CLI entry point: runs the full search (run_search), and regardless of
+    success or failure optionally sends a notification and/or shuts down the
+    machine (useful for unattended cloud runs); re-raises any exception after
+    those finally-clauses so failures are still visible/non-silent."""
     args = parse_args()
     best_record = None
     err = None
@@ -172,6 +245,27 @@ def main():
 
 
 def run_search(args):
+    """Orchestrates the full Part 2.B experiment grid across model families.
+
+    For each family in args.models (bert, gpt2):
+      1. Build the shared train/dev/test DataLoaders once (valid for both the
+         base and large/medium variant of the family).
+      2. Run the 2-step greedy search (lr, then dropout) on the BASE model
+         only, each candidate evaluated over args.runs seeds via
+         run_experiments, propagating the winning value of each step into
+         `config` before the next step starts (so dropout's candidates are
+         tried with the already-chosen winning lr).
+      3. Fine-tune the family's LARGE/MEDIUM variant exactly once, reusing the
+         winning base config — deliberately not re-searched, since searching
+         lr/dropout again on the bigger model would be much more expensive
+         for a comparison that (as the results show) doesn't pay off.
+      4. Pick the family's best of {base, large/medium} by dev Slot F1, and
+         optionally save its weights via save_best().
+    Every experiment is looked up against already-logged results
+    (done_experiments/load_results) before running and skipped if found,
+    making the whole search resumable/idempotent across interrupted runs.
+    Returns the single best record (by dev Slot F1) across all families.
+    """
     device = get_device()
     print(f"Device: {device}")
     os.makedirs(BIN_DIR, exist_ok=True)
@@ -199,10 +293,18 @@ def run_search(args):
         print(f"  base  : {base_name}")
         print(f"  large : {large_name}")
 
+        # Built once per family and reused for both the base greedy search
+        # and the large/medium run, since tokenization/vocabulary is shared
+        # within a family (see build_loaders docstring).
         loaders       = build_loaders(model_type, lang, train_raw, dev_raw, test_raw, args)
         make_datasets = lambda: loaders
 
         def get_or_run(name, param, cfg, mn):
+            """Idempotent skip-if-done runner: returns the cached record for
+            `name` if already present in results.json, otherwise runs
+            run_experiments for that exact (param, cfg, model_name)
+            combination, logs the new record, regenerates the Markdown
+            report, and marks `name` as done."""
             if name in done:
                 print(f"[skip] {name} (gia' in {RESULTS_JSON})")
                 return records[name]
@@ -220,6 +322,10 @@ def run_search(args):
             return rec
 
         # --- Ricerca greedy sul modello BASE ---
+        # `config` starts at BASE defaults and is mutated step by step: each
+        # step's winning value is written into config[param] before the next
+        # step runs, so later steps (and the eventual large/medium run) always
+        # see the already-decided winners of earlier steps.
         config = dict(BASE)
         best_score, model_best = None, None
         for param, label, candidates in SEARCH_STEPS:
@@ -230,6 +336,9 @@ def run_search(args):
                 rec  = get_or_run(name, param, {**config, param: v}, base_name)
                 score = rec["dev_f1_mean"]
                 print(f"  {name}: dev F1 = {score:.4f} (test F1 {rec['slot_f1_mean']:.4f})")
+                # Track the best-by-dev-F1 candidate seen in this step; ties
+                # keep the first (earliest-tried) candidate since only a
+                # strict improvement (score > step_score) replaces it.
                 if step_score is None or score > step_score:
                     step_value, step_score, step_rec = v, score, rec
             config[param] = step_value
@@ -242,6 +351,10 @@ def run_search(args):
               f"| test acc {model_best['intent_acc_mean']:.4f}")
 
         # --- Esperimento sul modello LARGE/MEDIUM con la config migliore ---
+        # Reuses the winning (lr, dropout) from the base greedy search above
+        # WITHOUT repeating the search on the larger model — a single
+        # fine-tuning run (over args.runs seeds) purely to check whether
+        # scaling up the backbone helps, not a new independent search.
         large_exp_name = f"{large_key}_lr{config['lr']}_dropout{config['dropout']}"
         print(f"\n--- LARGE/MEDIUM: {large_name} (config: lr={config['lr']}, dropout={config['dropout']}) ---")
         rec_large = get_or_run(large_exp_name, "large", config, large_name)
@@ -275,7 +388,18 @@ def run_search(args):
 
 def save_best(model_name, model_type, config, model_best, loaders,
               lang, slots_size, n_intents, device, args):
-    """Allena UNA istanza della config migliore e salva state_dict + vocabolari."""
+    """Allena UNA istanza della config migliore e salva state_dict + vocabolari.
+
+    English: Re-trains a single instance (1 run, deterministic seed) of the
+    winning configuration found above (identified by model_best['experiment'])
+    purely to obtain a persisted checkpoint, since run_experiments/
+    run_search keep only metrics, not model weights, for the multi-seed
+    search runs. Skips re-training if a checkpoint for this experiment
+    already exists in BIN_DIR (idempotent, like the rest of the search).
+    Saves the state_dict together with model_name, model_type, the
+    hyperparameter config, and the slot/intent vocabularies needed to
+    reload and use the model later for inference.
+    """
     best_pt = os.path.join(BIN_DIR, f"{model_best['experiment']}.pt")
     if os.path.exists(best_pt):
         print(f"[bin] Modello migliore gia' presente: {best_pt}")
