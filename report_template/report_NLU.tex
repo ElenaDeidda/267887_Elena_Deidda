@@ -1,0 +1,105 @@
+\documentclass[a4paper]{article}
+
+\usepackage{INTERSPEECH2021}
+\usepackage{booktabs}
+
+% Align floats on a float page to the top instead of vertically centered
+\makeatletter
+\setlength{\@fptop}{0pt}
+\makeatother
+
+\title{NLU course project: Intent Classification and Slot Filling}
+\name{Elena Deidda (mat. 267887)}
+
+\address{
+  University of Trento}
+\email{elena.deidda@studenti.unitn.it}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+I tackle joint intent classification and slot filling on ATIS, evaluated
+with Intent Accuracy and chunk-level Slot F1 (CoNLL). In Part~A I train a
+GPT-2-style decoder-only Transformer \emph{from scratch}, reaching test Slot
+F1 0.888 and Intent Accuracy 0.934. In Part~B I fine-tune pre-trained
+BERT~\cite{devlin2019} and GPT-2~\cite{radford2019}, following the joint
+intent/slot setup of~\cite{chen2019}; the best model (BERT-base) reaches test
+Slot F1 0.955 and Intent Accuracy 0.975, confirming the benefit of a
+pre-trained, bidirectional encoder for slot tagging.
+
+\section{Implementation details}
+Slot loss (cross-entropy, padding ignored) and intent loss (cross-entropy) are
+summed; all models are run with multiple seeds and I report mean$\pm$std on
+the test set. Hyper-parameters are always selected on the \emph{dev} Slot F1.
+
+\textbf{Part A.} Since the model is autoregressive, a \texttt{CLS} token is
+appended at the \emph{end} of each utterance (not at the start): being the
+last position, it is the only one that has attended to the whole sentence,
+so its final hidden state is used for intent classification. The search is
+greedy: learning rate first, then the architecture
+(\texttt{d\_model}, heads, layers, FFN size, each tested against the current
+incumbent), then dropout. Only \texttt{n\_heads} (2$\to$4) improved over the
+initial small model; \texttt{d\_model}, \texttt{num\_layers}, \texttt{ff\_dim}
+and dropout were all tested but none of their candidates beat the incumbent
+dev F1, so the final model keeps the original (small) values for those
+hyper-parameters. I interpret this as ATIS being small enough that the
+smallest architecture already has sufficient capacity, with extra parameters
+or regularization providing no further benefit.
+
+\textbf{Part B.} BERT uses the hidden state at \texttt{[CLS]} (first token)
+for intent classification, while GPT-2, being causal, uses the hidden state
+at the last \emph{real} token (via the per-sequence length, not the last
+padded position). Sub-word labels are aligned so only the first sub-token of
+each word carries the real slot label; the rest (and the special tokens) are
+ignored in the loss. For each family I search learning rate then dropout on
+the base model, then evaluate the larger variant (BERT-large, GPT-2-medium)
+with the same configuration.
+
+\section{Results}
+Table~\ref{tab:nlua} reports Part~A: the lr search already reaches most of
+the achievable performance, and only \texttt{n\_heads} contributes a further,
+modest gain. Table~\ref{tab:nlub} reports Part~B: BERT clearly outperforms
+GPT-2 on slot filling (0.955 vs 0.915 test F1), consistent with BERT's
+bidirectional context being more suited to per-token tagging than GPT-2's
+left-to-right attention. Scaling up to the large/medium variant does not
+improve test metrics for either family despite 3$\times$ more parameters,
+suggesting ATIS is already saturated by the base-sized pre-trained models.
+
+\begin{table}[t]
+  \centering
+  \caption{Part~A --- best model per step (231K param. throughout). Final:
+           $d{=}64$, 4 heads, 2 layers, FFN 256, dropout 0.}
+  \label{tab:nlua}
+  \begin{tabular}{lcccc}
+    \toprule
+    Step & Adopted & Dev F1 & Test Slot F1 & Test Int.\ Acc \\
+    \midrule
+    0 -- lr           & $0.01$ & 0.929 & 0.876$\pm$.007 & 0.921$\pm$.017 \\
+    1 -- architecture  & heads$=$4 & \textbf{0.941} & \textbf{0.888$\pm$.006} & \textbf{0.934$\pm$.006} \\
+    2 -- dropout       & none (0) & 0.941 & 0.888$\pm$.006 & 0.934$\pm$.006 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{table}[t]
+  \centering
+  \caption{Part~B --- fine-tuning (best lr/dropout per family).}
+  \label{tab:nlub}
+  \begin{tabular}{lrccc}
+    \toprule
+    Model & Param & Dev F1 & Test Slot F1 & Test Int.\ Acc \\
+    \midrule
+    BERT-base    & 109.6M & \textbf{0.984} & \textbf{0.955$\pm$.002} & \textbf{0.975$\pm$.001} \\
+    BERT-large   & 335.3M & 0.983 & 0.955$\pm$.001 & 0.975$\pm$.002 \\
+    GPT-2-base   & 124.6M & 0.963 & 0.915$\pm$.004 & 0.971$\pm$.002 \\
+    GPT-2-medium & 355.0M & 0.964 & 0.913$\pm$.002 & 0.969$\pm$.003 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\bibliographystyle{IEEEtran}
+\bibliography{mybib}
+
+\end{document}

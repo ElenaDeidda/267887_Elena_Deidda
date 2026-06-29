@@ -1,14 +1,14 @@
 # Osservazioni esperimenti - LM Part 1.B (LoRA)
 
-_Generato automaticamente da main.py. Ultimo aggiornamento: 2026-06-29T11:44:06._
+_Generato automaticamente da main.py. Ultimo aggiornamento: 2026-06-29T14:08:53._
 
 Vincolo della consegna: **PPL test < 250**.
 
 ## Migliore configurazione finora
 
-- selezione su **best dev PPL: 21.03** -> **Test PPL: 19.14** (OK <250)
-- esperimento: `step2_alpha_half`
-- rank: `16` | alpha: `8` | scaling: `0.5` | lr: `0.0005`
+- selezione su **best dev PPL: 21.01** -> **Test PPL: 19.15** (OK <250)
+- esperimento: `step2_alpha_eq`
+- rank: `16` | alpha: `16` | scaling: `1.0` | lr: `0.0005`
 - parametri addestrabili (LoRA): 884,736
 
 ## Step 0
@@ -40,8 +40,9 @@ _Step 2 - Alpha (a parita' del miglior rank; scaling = alpha/rank)._
 
 | esperimento | rank | alpha | scaling | lr | epoche | dev PPL | test PPL | <250 | |
 |---|---|---|---|---|---|---|---|---|---|
-| step2_alpha_half | 16 | 8 | 0.5 | 0.0005 | 20 | 21.03 | 19.14 | si | * |
+| step2_alpha_half | 16 | 8 | 0.5 | 0.0005 | 20 | 21.03 | 19.14 | si |  |
+| step2_alpha_eq | 16 | 16 | 1.0 | 0.0005 | 20 | 21.01 | 19.15 | si | * |
 
-- Osservazione (scelta sul dev): migliore `step2_alpha_half` (dev PPL 21.03, test PPL 19.14).
+- Osservazione (scelta sul dev): migliore `step2_alpha_eq` (dev PPL 21.01, test PPL 19.15).
 - Note (da completare nel report): 
 
