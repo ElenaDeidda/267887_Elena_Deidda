@@ -30,7 +30,7 @@ through a learning-rate and architecture search, dropout, and a weight-tying
 ablation, lowering test PPL from 35.68 to 33.07. For Part~B, the pre-trained
 GPT-2 is fine-tuned with LoRA, training only low-rank adapters on the
 $Q,K,V$ projections while the 124M backbone stays frozen, reaching test PPL
-19.14. Both parts satisfy PPL${<}250$, and Part~B improves on Part~A by 42\%
+19.15. Both parts satisfy PPL${<}250$, and Part~B improves on Part~A by 42\%
 relative, training only 0.7\% of the parameters.
 
 \section{Implementation details}
@@ -61,11 +61,15 @@ training starts exactly from the pre-trained model; only the adapters train
 (0.7\% of parameters at rank 16). The search order is learning rate (rank 4,
 $\alpha{=}8$ fixed), then rank $r\in\{4,8,16\}$, then $\alpha$ at the best
 rank. PPL decreases monotonically with rank, as a larger rank gives the
-adapter more capacity to adjust the frozen backbone. A lower-than-default
-scaling ($\alpha{=}8$ at rank 16) then gives the best result: since GPT-2 is
-already pre-trained on a far larger corpus than PTB, a smaller update keeps
-the fine-tuned model closer to the pre-trained one, preserving more of its
-general linguistic knowledge.
+adapter more capacity to adjust the frozen backbone. At the best rank, a
+default scaling ($\alpha{=}r{=}16$) gives the lowest dev PPL (21.01), only
+marginally ahead of a more conservative $\alpha{=}8$ (scaling 0.5, dev PPL
+21.03, test PPL 19.14 vs.\ 19.15 -- within noise of one another), while
+doubling the scaling ($\alpha{=}32$) is clearly worse (dev PPL 21.20): since
+GPT-2 is already pre-trained on a far larger corpus than PTB, too large an
+update pushes the fine-tuned model further from the pre-trained one than is
+useful, eroding more of its general linguistic knowledge than it gains in
+PTB-specific fit.
 
 \section{Results}
 Hyper-parameters are always selected on dev PPL, and test PPL is reported
@@ -73,12 +77,22 @@ only for the selected configuration, to avoid test-set leakage. Table~\ref{tab:l
 and Figure~\ref{fig:lma} trace Part~A: every step except weight tying
 improves test PPL, with depth and FFN size contributing the largest gains.
 Table~\ref{tab:lmb} reports Part~B: PPL decreases monotonically with rank,
-and a smaller scaling at the best rank gives the lowest test PPL, 19.14.
-Comparing the two parts, Part~B improves on the best from-scratch model by
-42\% relative while training only 0.88M of 125M parameters: this gap is
-attributable to the pre-trained backbone already encoding general English
-syntax and semantics from a far larger corpus, with LoRA only specializing
-that knowledge to PTB, rather than to the fine-tuning technique itself.
+and at the best rank a default scaling ($\alpha{=}r$) gives the lowest dev
+PPL (21.01), the selected configuration, with test PPL 19.15.
+Figure~\ref{fig:lmb} traces the Part~B search step by step, the direct
+counterpart of Figure~\ref{fig:lma}. Comparing the two parts, Part~B improves
+on the best from-scratch model by 42\% relative while training only 0.88M of
+125M parameters: Figure~\ref{fig:params} makes this explicit, with the LoRA
+models reaching far lower test PPL than any from-scratch model despite two
+orders of magnitude fewer trainable parameters (though they leverage the
+frozen 124M pre-trained backbone). This gap is attributable to that backbone
+already encoding general English syntax and semantics from a far larger
+corpus, with LoRA only specializing that knowledge to PTB, rather than to the
+fine-tuning technique itself. The two regimes also differ in convergence
+(Figure~\ref{fig:conv}): the from-scratch models reach their best dev PPL
+within ${\sim}2$ epochs and then overfit, whereas the LoRA adapters, far
+harder to overfit on a frozen backbone, keep improving up to epochs
+${\sim}14$--$20$.
 
 \begin{figure}[t]
   \centering
@@ -119,10 +133,37 @@ that knowledge to PTB, rather than to the fine-tuning technique itself.
     4  & 8  & 0.22M & 23.27 & 21.02 \\
     8  & 16 & 0.44M & 21.99 & 19.91 \\
     16 & 32 & 0.88M & 21.20 & 19.35 \\
-    16 & 8  & 0.88M & \textbf{21.03} & \textbf{19.14} \\
+    16 & 16 & 0.88M & \textbf{21.01} & \textbf{19.15} \\
+    16 & 8  & 0.88M & 21.03 & 19.14 \\
     \bottomrule
   \end{tabular}
 \end{table}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{partB_ppl_steps.png}
+  \caption{Part~B: dev and test PPL after each incremental search step
+           (learning rate, rank, then $\alpha$).}
+  \label{fig:lmb}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{lm_params_vs_ppl.png}
+  \caption{Trainable parameters vs test PPL. Part~B (LoRA) reaches far lower
+           PPL with two orders of magnitude fewer trainable parameters, on top
+           of a frozen 124M pre-trained backbone.}
+  \label{fig:params}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{lm_convergence.png}
+  \caption{Epoch at which dev PPL bottomed out (early-stopping point). The
+           from-scratch models overfit within ${\sim}2$ epochs; the LoRA
+           adapters keep improving for far longer.}
+  \label{fig:conv}
+\end{figure}
 
 \bibliographystyle{IEEEtran}
 \bibliography{mybib}
