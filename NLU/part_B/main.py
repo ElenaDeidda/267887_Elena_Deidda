@@ -1,14 +1,18 @@
 # main.py
-# Part 2.B - Fine-tuning di BERT (encoder) e GPT-2 (decoder) per intent + slot su ATIS.
+# Part 2.B - Fine-tuning di BERT (base+large) e GPT-2 (base+medium) per intent + slot su ATIS.
 #
-# Per OGNI modello si fa una ricerca greedy (vincitore scelto sulla DEV F1):
-#   Step 0 - learning rate
-#   Step 1 - dropout sulle teste di output
+# Per OGNI famiglia (bert, gpt2):
+#   Step 0 - ricerca greedy del learning rate sul modello BASE
+#   Step 1 - ricerca greedy del dropout sul modello BASE (con il miglior lr)
+#   Step 2 - esperimento singolo sul modello LARGE/MEDIUM con la config migliore
 #
-# Ogni configurazione e' ripetuta su piu' run (media +- std di Slot F1 conll e
-# Intent Accuracy). I risultati vanno in results/results.json (idempotente) e
-# observations.md (tabelle separate per BERT e GPT-2). Il modello migliore di
-# ciascun tipo viene salvato in bin/.
+# bert-base e bert-large condividono lo stesso tokenizer WordPiece (stesso vocab),
+# idem gpt2 e gpt2-medium (BPE): i DataLoader costruiti per il base valgono anche
+# per la variante large/medium.
+#
+# Selezione sulla DEV F1; ogni configurazione e' ripetuta su piu' run
+# (media +- std di Slot F1 conll e Intent Accuracy).
+# Risultati in results/results.json e observations.md. Modelli migliori in bin/.
 #
 # Uso:
 #   python main.py
@@ -38,19 +42,30 @@ from functions import (
 # ----------------------------------------------------------------------------
 # Percorsi
 # ----------------------------------------------------------------------------
-DATA_DIR = os.path.join("dataset", "ATIS")
-TRAIN_PATH = os.path.join(DATA_DIR, "train.json")
-TEST_PATH = os.path.join(DATA_DIR, "test.json")
+DATA_DIR        = os.path.join("dataset", "ATIS")
+TRAIN_PATH      = os.path.join(DATA_DIR, "train.json")
+TEST_PATH       = os.path.join(DATA_DIR, "test.json")
 
-RESULTS_DIR = "results"
-RESULTS_JSON = os.path.join(RESULTS_DIR, "results.json")
+RESULTS_DIR     = "results"
+RESULTS_JSON    = os.path.join(RESULTS_DIR, "results.json")
 OBSERVATIONS_MD = os.path.join(RESULTS_DIR, "observations.md")
-BIN_DIR = "bin"
+BIN_DIR         = "bin"
 
 # ----------------------------------------------------------------------------
-# Modelli e ricerca greedy (per ciascun modello)
+# Famiglie di modelli: base -> large/medium (stesso tokenizer per entrambi)
 # ----------------------------------------------------------------------------
-MODEL_NAMES = {"bert": "bert-base-uncased", "gpt2": "openai-community/gpt2"}
+MODEL_FAMILIES = {
+    "bert": {
+        "base":  "bert-base-uncased",
+        "large": "bert-large-uncased",
+        "type":  "bert",
+    },
+    "gpt2": {
+        "base":  "openai-community/gpt2",
+        "large": "openai-community/gpt2-medium",
+        "type":  "gpt2",
+    },
+}
 
 BASE = {"lr": 5e-5, "dropout": 0.1}
 
@@ -61,16 +76,17 @@ SEARCH_STEPS = [
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Fine-tuning BERT/GPT-2 per intent+slot (Part 2.B).")
-    p.add_argument("--models", nargs="+", default=["bert", "gpt2"], choices=["bert", "gpt2"])
-    p.add_argument("--runs", type=int, default=3)
-    p.add_argument("--epochs", type=int, default=30)
+    p = argparse.ArgumentParser(
+        description="Fine-tuning BERT/GPT-2 (base+large) per intent+slot (Part 2.B).")
+    p.add_argument("--models",   nargs="+", default=["bert", "gpt2"], choices=["bert", "gpt2"])
+    p.add_argument("--runs",     type=int, default=3)
+    p.add_argument("--epochs",   type=int, default=30)
     p.add_argument("--patience", type=int, default=3)
-    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--seed",     type=int, default=42)
     p.add_argument("--bs_train", type=int, default=32)
-    p.add_argument("--bs_eval", type=int, default=64)
-    p.add_argument("--no_save", action="store_true")
-    p.add_argument("--notify", type=str, default=None)
+    p.add_argument("--bs_eval",  type=int, default=64)
+    p.add_argument("--no_save",  action="store_true")
+    p.add_argument("--notify",   type=str, default=None)
     p.add_argument("--shutdown", action="store_true")
     return p.parse_args()
 
@@ -95,7 +111,7 @@ def send_notification(target, best=None, error=None):
     if error is not None:
         title, message = "Run 2.B FALLITA", f"Errore: {type(error).__name__}: {error}"
     elif best is not None:
-        title = f"Run 2.B finita - test F1 {best['slot_f1_mean']:.3f}"
+        title   = f"Run 2.B finita - test F1 {best['slot_f1_mean']:.3f}"
         message = (f"Best: {best['experiment']} ({best['model_name']})\n"
                    f"dev F1 {best['dev_f1_mean']:.3f} | test F1 {best['slot_f1_mean']:.3f} "
                    f"| test acc {best['intent_acc_mean']:.3f}")
@@ -123,19 +139,19 @@ def shutdown_machine():
 
 
 def build_loaders(model_type, lang, train_raw, dev_raw, test_raw, args):
-    """Costruisce i tre DataLoader per il modello scelto (tokenizer + dataset + collate)."""
+    """Costruisce i DataLoader per il tipo di modello (bert o gpt2).
+    Il tokenizer base e' valido anche per large/medium (stesso vocabolario)."""
     if model_type == "bert":
-        tokenizer = get_bert_tokenizer(MODEL_NAMES["bert"])
-        ds = lambda raw: BERTIntentsAndSlots(raw, lang, tokenizer)
-        collate = collate_fn_bert
+        tokenizer = get_bert_tokenizer(MODEL_FAMILIES["bert"]["base"])
+        ds        = lambda raw: BERTIntentsAndSlots(raw, lang, tokenizer)
+        collate   = collate_fn_bert
     else:
-        tokenizer = get_gpt2_tokenizer(MODEL_NAMES["gpt2"])
-        ds = lambda raw: GPT2IntentsAndSlots(raw, lang, tokenizer)
-        collate = collate_fn_gpt2
+        tokenizer = get_gpt2_tokenizer(MODEL_FAMILIES["gpt2"]["base"])
+        ds        = lambda raw: GPT2IntentsAndSlots(raw, lang, tokenizer)
+        collate   = collate_fn_gpt2
 
-    loaders = get_dataloaders(ds(train_raw), ds(dev_raw), ds(test_raw), collate,
-                              batch_size_train=args.bs_train, batch_size_eval=args.bs_eval)
-    return loaders
+    return get_dataloaders(ds(train_raw), ds(dev_raw), ds(test_raw), collate,
+                           batch_size_train=args.bs_train, batch_size_eval=args.bs_eval)
 
 
 def main():
@@ -161,30 +177,38 @@ def run_search(args):
     os.makedirs(BIN_DIR, exist_ok=True)
 
     tmp_train_raw = load_data(TRAIN_PATH)
-    test_raw = load_data(TEST_PATH)
+    test_raw      = load_data(TEST_PATH)
     train_raw, dev_raw = create_dev_split(tmp_train_raw, dev_size=0.10)
     lang = build_lang(train_raw, dev_raw, test_raw)
     slots_size, n_intents = len(lang.slot2id), len(lang.intent2id)
     print(f"Train: {len(train_raw)} | Dev: {len(dev_raw)} | Test: {len(test_raw)}")
     print(f"Slot: {slots_size} | Intent: {n_intents}\n")
 
-    done = done_experiments(RESULTS_JSON)
+    done    = done_experiments(RESULTS_JSON)
     records = {r["experiment"]: r for r in load_results(RESULTS_JSON)}
     global_best = None
 
-    for model_type in args.models:
-        model_name = MODEL_NAMES[model_type]
-        print(f"\n########## MODELLO: {model_type} ({model_name}) ##########")
-        loaders = build_loaders(model_type, lang, train_raw, dev_raw, test_raw, args)
+    for family in args.models:
+        fam        = MODEL_FAMILIES[family]
+        model_type = fam["type"]
+        base_name  = fam["base"]
+        large_name = fam["large"]
+        large_key  = "bert-large" if family == "bert" else "gpt2-medium"
+
+        print(f"\n########## FAMIGLIA: {family} ##########")
+        print(f"  base  : {base_name}")
+        print(f"  large : {large_name}")
+
+        loaders       = build_loaders(model_type, lang, train_raw, dev_raw, test_raw, args)
         make_datasets = lambda: loaders
 
-        def get_or_run(name, param, cfg):
+        def get_or_run(name, param, cfg, mn):
             if name in done:
                 print(f"[skip] {name} (gia' in {RESULTS_JSON})")
                 return records[name]
             info = run_experiments(
                 make_datasets, lang, slots_size, n_intents,
-                lr=cfg["lr"], model_name=model_name, model_type=model_type,
+                lr=cfg["lr"], model_name=mn, model_type=model_type,
                 dropout=cfg["dropout"], n_runs=args.runs, n_epochs=args.epochs,
                 patience=args.patience, experiment_name=name, seed=args.seed, device=device,
             )
@@ -195,15 +219,15 @@ def run_search(args):
             records[name] = rec
             return rec
 
-        # cascata greedy per questo modello (selezione sulla DEV F1)
+        # --- Ricerca greedy sul modello BASE ---
         config = dict(BASE)
         best_score, model_best = None, None
         for param, label, candidates in SEARCH_STEPS:
-            print(f"\n--- STEP '{param}' ({model_type}, incumbent = {config[param]}) ---")
+            print(f"\n--- STEP '{param}' ({family}-base, incumbent = {config[param]}) ---")
             step_value, step_score, step_rec = config[param], best_score, model_best
             for v in candidates:
-                name = f"{model_type}_{label}{v}"
-                rec = get_or_run(name, param, {**config, param: v})
+                name = f"{family}_{label}{v}"
+                rec  = get_or_run(name, param, {**config, param: v}, base_name)
                 score = rec["dev_f1_mean"]
                 print(f"  {name}: dev F1 = {score:.4f} (test F1 {rec['slot_f1_mean']:.4f})")
                 if step_score is None or score > step_score:
@@ -212,16 +236,32 @@ def run_search(args):
             best_score, model_best = step_score, step_rec
             print(f"  -> '{param}' = {step_value} (dev F1 = {step_score:.4f})")
 
-        print(f"\n>>> Migliore {model_type}: {model_best['experiment']} "
-              f"| dev F1 {model_best['dev_f1_mean']:.4f} | test F1 {model_best['slot_f1_mean']:.4f} "
+        print(f"\n>>> Migliore {family}-base: {model_best['experiment']} "
+              f"| dev F1 {model_best['dev_f1_mean']:.4f} "
+              f"| test F1 {model_best['slot_f1_mean']:.4f} "
               f"| test acc {model_best['intent_acc_mean']:.4f}")
 
-        if not args.no_save:
-            save_best(model_type, model_name, config, model_best, loaders, lang,
-                      slots_size, n_intents, device, args)
+        # --- Esperimento sul modello LARGE/MEDIUM con la config migliore ---
+        large_exp_name = f"{large_key}_lr{config['lr']}_dropout{config['dropout']}"
+        print(f"\n--- LARGE/MEDIUM: {large_name} (config: lr={config['lr']}, dropout={config['dropout']}) ---")
+        rec_large = get_or_run(large_exp_name, "large", config, large_name)
+        print(f"  {large_exp_name}: dev F1 = {rec_large['dev_f1_mean']:.4f} "
+              f"(test F1 {rec_large['slot_f1_mean']:.4f})")
 
-        if global_best is None or model_best["dev_f1_mean"] > global_best["dev_f1_mean"]:
-            global_best = model_best
+        # Migliore tra base e large per questa famiglia (selezione sulla dev F1)
+        family_best    = max([model_best, rec_large], key=lambda r: r["dev_f1_mean"])
+        family_best_mn = large_name if family_best is rec_large else base_name
+        print(f"\n>>> Migliore {family} (base vs large): {family_best['experiment']} "
+              f"| dev F1 {family_best['dev_f1_mean']:.4f} "
+              f"| test F1 {family_best['slot_f1_mean']:.4f} "
+              f"| test acc {family_best['intent_acc_mean']:.4f}")
+
+        if not args.no_save:
+            save_best(family_best_mn, model_type, config, family_best, loaders,
+                      lang, slots_size, n_intents, device, args)
+
+        if global_best is None or family_best["dev_f1_mean"] > global_best["dev_f1_mean"]:
+            global_best = family_best
 
     print("\n" + "=" * 70)
     print(f"MIGLIORE GLOBALE (dev F1): {global_best['experiment']} ({global_best['model_name']})")
@@ -233,9 +273,9 @@ def run_search(args):
     return global_best
 
 
-def save_best(model_type, model_name, config, model_best, loaders, lang,
-              slots_size, n_intents, device, args):
-    """Allena UNA istanza della config migliore del modello e salva state_dict + vocabolari."""
+def save_best(model_name, model_type, config, model_best, loaders,
+              lang, slots_size, n_intents, device, args):
+    """Allena UNA istanza della config migliore e salva state_dict + vocabolari."""
     best_pt = os.path.join(BIN_DIR, f"{model_best['experiment']}.pt")
     if os.path.exists(best_pt):
         print(f"[bin] Modello migliore gia' presente: {best_pt}")
@@ -249,8 +289,8 @@ def save_best(model_type, model_name, config, model_best, loaders, lang,
     else:
         model = GPT2forNLU(slots_size, n_intents, model_name, config["dropout"]).to(device)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config["lr"])
-    criterion_slots = nn.CrossEntropyLoss(ignore_index=IGNORE_INDEX)
+    optimizer         = torch.optim.AdamW(model.parameters(), lr=config["lr"])
+    criterion_slots   = nn.CrossEntropyLoss(ignore_index=IGNORE_INDEX)
     criterion_intents = nn.CrossEntropyLoss()
     best_model, best_f1, best_acc = train_model(
         model, train_loader, dev_loader, lang, optimizer,

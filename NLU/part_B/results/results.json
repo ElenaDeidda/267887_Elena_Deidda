@@ -1,0 +1,338 @@
+[
+  {
+    "timestamp": "2026-06-28T23:09:16",
+    "experiment": "bert_lr0.0001",
+    "param": "lr",
+    "seed": 42,
+    "model_name": "bert-base-uncased",
+    "model_type": "bert",
+    "lr": 0.0001,
+    "dropout": 0.1,
+    "n_params": 109602204,
+    "n_runs": 3,
+    "dev_f1_mean": 0.9811,
+    "dev_acc_mean": 0.9859,
+    "slot_f1_mean": 0.9559,
+    "slot_f1_std": 0.0014,
+    "intent_acc_mean": 0.9742,
+    "intent_acc_std": 0.0027,
+    "slot_f1_runs": [
+      0.955,
+      0.9548,
+      0.9578
+    ],
+    "intent_acc_runs": [
+      0.9709,
+      0.9742,
+      0.9776
+    ]
+  },
+  {
+    "timestamp": "2026-06-28T23:27:11",
+    "experiment": "bert_lr5e-05",
+    "param": "lr",
+    "seed": 42,
+    "model_name": "bert-base-uncased",
+    "model_type": "bert",
+    "lr": 5e-05,
+    "dropout": 0.1,
+    "n_params": 109602204,
+    "n_runs": 3,
+    "dev_f1_mean": 0.9838,
+    "dev_acc_mean": 0.9913,
+    "slot_f1_mean": 0.9552,
+    "slot_f1_std": 0.0015,
+    "intent_acc_mean": 0.9746,
+    "intent_acc_std": 0.0014,
+    "slot_f1_runs": [
+      0.9548,
+      0.9536,
+      0.9573
+    ],
+    "intent_acc_runs": [
+      0.9742,
+      0.9765,
+      0.9731
+    ]
+  },
+  {
+    "timestamp": "2026-06-28T23:53:08",
+    "experiment": "bert_lr2e-05",
+    "param": "lr",
+    "seed": 42,
+    "model_name": "bert-base-uncased",
+    "model_type": "bert",
+    "lr": 2e-05,
+    "dropout": 0.1,
+    "n_params": 109602204,
+    "n_runs": 3,
+    "dev_f1_mean": 0.9822,
+    "dev_acc_mean": 0.9893,
+    "slot_f1_mean": 0.9544,
+    "slot_f1_std": 0.0023,
+    "intent_acc_mean": 0.975,
+    "intent_acc_std": 0.0032,
+    "slot_f1_runs": [
+      0.9568,
+      0.9512,
+      0.9552
+    ],
+    "intent_acc_runs": [
+      0.9709,
+      0.9787,
+      0.9754
+    ]
+  },
+  {
+    "timestamp": "2026-06-29T00:10:57",
+    "experiment": "bert_dropout0.1",
+    "param": "dropout",
+    "seed": 42,
+    "model_name": "bert-base-uncased",
+    "model_type": "bert",
+    "lr": 5e-05,
+    "dropout": 0.1,
+    "n_params": 109602204,
+    "n_runs": 3,
+    "dev_f1_mean": 0.9838,
+    "dev_acc_mean": 0.9913,
+    "slot_f1_mean": 0.9552,
+    "slot_f1_std": 0.0015,
+    "intent_acc_mean": 0.9746,
+    "intent_acc_std": 0.0014,
+    "slot_f1_runs": [
+      0.9548,
+      0.9536,
+      0.9573
+    ],
+    "intent_acc_runs": [
+      0.9742,
+      0.9765,
+      0.9731
+    ]
+  },
+  {
+    "timestamp": "2026-06-29T00:26:45",
+    "experiment": "bert_dropout0.3",
+    "param": "dropout",
+    "seed": 42,
+    "model_name": "bert-base-uncased",
+    "model_type": "bert",
+    "lr": 5e-05,
+    "dropout": 0.3,
+    "n_params": 109602204,
+    "n_runs": 3,
+    "dev_f1_mean": 0.9824,
+    "dev_acc_mean": 0.9906,
+    "slot_f1_mean": 0.9519,
+    "slot_f1_std": 0.0037,
+    "intent_acc_mean": 0.9731,
+    "intent_acc_std": 0.0027,
+    "slot_f1_runs": [
+      0.9536,
+      0.9553,
+      0.9469
+    ],
+    "intent_acc_runs": [
+      0.9731,
+      0.9765,
+      0.9698
+    ]
+  },
+  {
+    "timestamp": "2026-06-29T01:24:36",
+    "experiment": "bert-large_lr5e-05_dropout0.1",
+    "param": "large",
+    "seed": 42,
+    "model_name": "bert-large-uncased",
+    "model_type": "bert",
+    "lr": 5e-05,
+    "dropout": 0.1,
+    "n_params": 335301788,
+    "n_runs": 3,
+    "dev_f1_mean": 0.9826,
+    "dev_acc_mean": 0.9926,
+    "slot_f1_mean": 0.9548,
+    "slot_f1_std": 0.0005,
+    "intent_acc_mean": 0.9754,
+    "intent_acc_std": 0.0016,
+    "slot_f1_runs": [
+      0.9543,
+      0.9554,
+      0.9548
+    ],
+    "intent_acc_runs": [
+      0.9776,
+      0.9742,
+      0.9742
+    ]
+  },
+  {
+    "timestamp": "2026-06-29T01:57:26",
+    "experiment": "gpt2_lr0.0001",
+    "param": "lr",
+    "seed": 42,
+    "model_name": "openai-community/gpt2",
+    "model_type": "gpt2",
+    "lr": 0.0001,
+    "dropout": 0.1,
+    "n_params": 124559772,
+    "n_runs": 3,
+    "dev_f1_mean": 0.9629,
+    "dev_acc_mean": 0.9873,
+    "slot_f1_mean": 0.9142,
+    "slot_f1_std": 0.0053,
+    "intent_acc_mean": 0.9694,
+    "intent_acc_std": 0.0011,
+    "slot_f1_runs": [
+      0.9187,
+      0.9171,
+      0.9068
+    ],
+    "intent_acc_runs": [
+      0.9686,
+      0.9709,
+      0.9686
+    ]
+  },
+  {
+    "timestamp": "2026-06-29T02:34:58",
+    "experiment": "gpt2_lr5e-05",
+    "param": "lr",
+    "seed": 42,
+    "model_name": "openai-community/gpt2",
+    "model_type": "gpt2",
+    "lr": 5e-05,
+    "dropout": 0.1,
+    "n_params": 124559772,
+    "n_runs": 3,
+    "dev_f1_mean": 0.9628,
+    "dev_acc_mean": 0.9859,
+    "slot_f1_mean": 0.9145,
+    "slot_f1_std": 0.0036,
+    "intent_acc_mean": 0.9709,
+    "intent_acc_std": 0.0016,
+    "slot_f1_runs": [
+      0.9126,
+      0.9196,
+      0.9113
+    ],
+    "intent_acc_runs": [
+      0.9731,
+      0.9698,
+      0.9698
+    ]
+  },
+  {
+    "timestamp": "2026-06-29T03:16:54",
+    "experiment": "gpt2_lr2e-05",
+    "param": "lr",
+    "seed": 42,
+    "model_name": "openai-community/gpt2",
+    "model_type": "gpt2",
+    "lr": 2e-05,
+    "dropout": 0.1,
+    "n_params": 124559772,
+    "n_runs": 3,
+    "dev_f1_mean": 0.9556,
+    "dev_acc_mean": 0.9893,
+    "slot_f1_mean": 0.9055,
+    "slot_f1_std": 0.009,
+    "intent_acc_mean": 0.9716,
+    "intent_acc_std": 0.0019,
+    "slot_f1_runs": [
+      0.9055,
+      0.9165,
+      0.8945
+    ],
+    "intent_acc_runs": [
+      0.9698,
+      0.9742,
+      0.9709
+    ]
+  },
+  {
+    "timestamp": "2026-06-29T03:43:04",
+    "experiment": "gpt2_dropout0.1",
+    "param": "dropout",
+    "seed": 42,
+    "model_name": "openai-community/gpt2",
+    "model_type": "gpt2",
+    "lr": 0.0001,
+    "dropout": 0.1,
+    "n_params": 124559772,
+    "n_runs": 3,
+    "dev_f1_mean": 0.9629,
+    "dev_acc_mean": 0.9873,
+    "slot_f1_mean": 0.9142,
+    "slot_f1_std": 0.0053,
+    "intent_acc_mean": 0.9694,
+    "intent_acc_std": 0.0011,
+    "slot_f1_runs": [
+      0.9187,
+      0.9171,
+      0.9068
+    ],
+    "intent_acc_runs": [
+      0.9686,
+      0.9709,
+      0.9686
+    ]
+  },
+  {
+    "timestamp": "2026-06-29T04:04:50",
+    "experiment": "gpt2_dropout0.3",
+    "param": "dropout",
+    "seed": 42,
+    "model_name": "openai-community/gpt2",
+    "model_type": "gpt2",
+    "lr": 0.0001,
+    "dropout": 0.3,
+    "n_params": 124559772,
+    "n_runs": 3,
+    "dev_f1_mean": 0.9599,
+    "dev_acc_mean": 0.9893,
+    "slot_f1_mean": 0.9158,
+    "slot_f1_std": 0.0053,
+    "intent_acc_mean": 0.9664,
+    "intent_acc_std": 0.0024,
+    "slot_f1_runs": [
+      0.9198,
+      0.9083,
+      0.9193
+    ],
+    "intent_acc_runs": [
+      0.9642,
+      0.9698,
+      0.9653
+    ]
+  },
+  {
+    "timestamp": "2026-06-29T05:23:16",
+    "experiment": "gpt2-medium_lr0.0001_dropout0.1",
+    "param": "large",
+    "seed": 42,
+    "model_name": "openai-community/gpt2-medium",
+    "model_type": "gpt2",
+    "lr": 0.0001,
+    "dropout": 0.1,
+    "n_params": 354983068,
+    "n_runs": 3,
+    "dev_f1_mean": 0.9644,
+    "dev_acc_mean": 0.9913,
+    "slot_f1_mean": 0.9125,
+    "slot_f1_std": 0.0016,
+    "intent_acc_mean": 0.9694,
+    "intent_acc_std": 0.0029,
+    "slot_f1_runs": [
+      0.9143,
+      0.9128,
+      0.9104
+    ],
+    "intent_acc_runs": [
+      0.972,
+      0.9653,
+      0.9709
+    ]
+  }
+]
